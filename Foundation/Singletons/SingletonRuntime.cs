@@ -31,7 +31,8 @@ namespace Foundation.Singletons
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Initialize()
         {
-            PlaySessionId++;
+            if (PlaySessionId < int.MaxValue) PlaySessionId++;
+
             IsQuitting = false;
 
             Application.quitting -= OnQuitting;
