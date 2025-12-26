@@ -60,8 +60,6 @@ public sealed class A : SingletonBehaviour<B> { }
 ただし C# の制約だけでは「誤って別型を指定した」などのケースを 100% 防ぎ切れないため、
 **ランタイムガード**（`this as T` の検証）も併用して、運用上の事故を早期に検出します。
 
----
-
 ### なぜ `SingletonRuntime` が必要なのか？
 
 Domain Reload を無効化すると、**static フィールドや static イベントのハンドラが Play 間で残留**し得ます。
@@ -209,7 +207,7 @@ public sealed class ScoreHUD : MonoBehaviour
 
 本実装は「同一個体を再利用しつつ、Play ごとに初期化を走らせる」運用を強く意識しています。
 
-Domain Reload 無効では static 状態や static イベント購読が残留し得るため、`OnSingletonAwake()` は **再実行に耐える（idempotent）**書き方が安全です。
+Domain Reload 無効では static 状態や static イベント購読が残留し得るため、`OnSingletonAwake()` は **再実行に耐える（idempotent）** 書き方が安全です。
 
 > 実務上のコツ：static イベント購読は「解除→登録」の形にしておくと、Domain Reload 無効時の二重購読を潰しやすくなります。
 
@@ -230,8 +228,6 @@ Domain Reload 無効では static 状態や static イベント購読が残留�
 
 > Unity のメッセージ関数は `virtual/override` ではなく「名前ベース」で呼ばれるため、言語機構で完全に禁止できません。チーム規約や IDE 検査で担保してください。
 
----
-
 ### ❌ 型パラメータには自分自身を指定する
 
 CRTP 制約により、以下のような誤った継承はコンパイルエラーになります：
@@ -244,8 +240,6 @@ public sealed class A : SingletonBehaviour<B> { }
 public sealed class A : SingletonBehaviour<A> { }
 ```
 
----
-
 ## Scene Placement Notes 🧱
 
 | 制約                    | 理由                               |
@@ -256,14 +250,10 @@ public sealed class A : SingletonBehaviour<A> { }
 本実装は、誤って子オブジェクトに配置された場合でも **自動で root に移動**して永続化します。
 ただし意図しない移動は混乱の元になり得るため、**Editor/Development ビルドのみ**警告ログを出す運用が合理的です（本実装もその方針）。
 
----
-
 ## Threading / Main Thread（重要）🧵
 
 `Instance` / `TryGetInstance` は内部で UnityEngine API（Find / GameObject 生成など）を呼びます。
 これらは **メインスレッドから呼び出す前提**で運用してください。
-
----
 
 ## Initialization Order（初期化順の固定が必要な場合）⏱️
 

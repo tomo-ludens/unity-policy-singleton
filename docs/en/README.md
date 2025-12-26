@@ -60,8 +60,6 @@ public sealed class A : SingletonBehaviour<B> { }
 However, C# constraints alone cannot catch 100% of misuse cases (e.g., accidentally specifying a different type).
 Therefore, a **runtime guard** (`this as T` validation) is also used to detect issues early in production.
 
----
-
 ### Why is `SingletonRuntime` necessary?
 
 When Domain Reload is disabled, **static fields and static event handlers can persist across Play sessions**.
@@ -80,14 +78,14 @@ This separation of responsibilities is maintained.
 
 ## Dependencies 🔍
 
-| API                                                          | Default Behavior                                                                        |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| API                                                          | Default Behavior                                                                                |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | `Object.FindAnyObjectByType<T>(FindObjectsInactive.Exclude)` | **Does not return assets / inactive objects / `HideFlags.DontSave`** (return value not guaranteed across calls) |
-| `Object.DontDestroyOnLoad()`                                 | **Only works on root GameObjects (or components on root GameObjects)**                  |
-| `Application.quitting`                                       | **Invoked when exiting Play Mode in Editor**. May not be detected during pause on Android |
-| `RuntimeInitializeLoadType.SubsystemRegistration`            | **Called before the first scene is loaded**                                             |
-| Domain Reload disabled                                       | **Static field values / static event handlers persist across Play sessions**            |
-| Scene Reload disabled                                        | **`OnEnable` / `OnDisable` / `OnDestroy` etc. are called as if newly loaded**           |
+| `Object.DontDestroyOnLoad()`                                 | **Only works on root GameObjects (or components on root GameObjects)**                          |
+| `Application.quitting`                                       | **Invoked when exiting Play Mode in Editor**. May not be detected during pause on Android       |
+| `RuntimeInitializeLoadType.SubsystemRegistration`            | **Called before the first scene is loaded**                                                     |
+| Domain Reload disabled                                       | **Static field values / static event handlers persist across Play sessions**                    |
+| Scene Reload disabled                                        | **`OnEnable` / `OnDisable` / `OnDestroy` etc. are called as if newly loaded**                   |
 
 ## Public API 📌
 
@@ -160,11 +158,11 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
 }
 ```
 
-| Item           | Recommendation                                        |
-| -------------- | ----------------------------------------------------- |
-| Class modifier | `sealed` (prevents unintended inheritance)            |
-| Initialization | Put in `OnSingletonAwake()` (re-initialization per Play) |
-| Cleanup        | Put in `OnSingletonDestroy()` (destruction only)      |
+| Item           | Recommendation                                            |
+| -------------- | --------------------------------------------------------- |
+| Class modifier | `sealed` (prevents unintended inheritance)                |
+| Initialization | Put in `OnSingletonAwake()` (re-initialization per Play)  |
+| Cleanup        | Put in `OnSingletonDestroy()` (destruction only)          |
 
 ---
 
@@ -230,8 +228,6 @@ Use `OnSingletonAwake()` for initialization and `OnSingletonDestroy()` for clean
 
 > Unity message methods are invoked by **name**, not via C# `virtual/override`, so this cannot be fully enforced by the language. Use team conventions and IDE inspections.
 
----
-
 ### ❌ Type parameter must be the class itself
 
 The CRTP constraint causes the following incorrect inheritance to produce a compile error:
@@ -244,26 +240,20 @@ public sealed class A : SingletonBehaviour<B> { }
 public sealed class A : SingletonBehaviour<A> { }
 ```
 
----
-
 ## Scene Placement Notes 🧱
 
-| Constraint                                         | Reason                                          |
-| -------------------------------------------------- | ----------------------------------------------- |
+| Constraint                                         | Reason                                                   |
+| -------------------------------------------------- | -------------------------------------------------------- |
 | Do not place the same singleton in multiple scenes | The later-initialized one will be destroyed (first wins) |
-| Root GameObject is preferable                      | `DontDestroyOnLoad` only works on root          |
+| Root GameObject is preferable                      | `DontDestroyOnLoad` only works on root                   |
 
 This implementation automatically reparents a child-placed singleton to root and persists it.
 Since unintended moves can be confusing, emitting a warning only in **Editor/Development builds** is a reasonable approach (and matches this implementation).
-
----
 
 ## Threading / Main Thread 🧵
 
 `Instance` / `TryGetInstance` call UnityEngine APIs internally (Find / GameObject creation, etc.).
 Call them from the **main thread**.
-
----
 
 ## Initialization Order ⏱️
 
