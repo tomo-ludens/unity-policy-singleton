@@ -18,6 +18,7 @@ Intended for use with Unity 6.3 (6000.3 series) or later.
 - ⚙️ **Domain Reload disabled support** (invalidates per-type static cache using Play session identifier)
 - 🧱 **Practical tolerance for misplacement** (reparents to root and persists even if placed as a child object)
 - 🧼 **Soft reset oriented** (runs `OnSingletonAwake()` each Play session, enabling re-initialization even for the same surviving instance)
+- 🖥️ **Edit Mode safe** (search only in Edit Mode, no side effects on static cache)
 
 ## Requirements ✅
 
@@ -31,8 +32,7 @@ Intended for use with Unity 6.3 (6000.3 series) or later.
 - Adjust the namespace according to your project conventions.
 
 ### Namespace Import
-
-```csharp
+````csharp
 using Foundation.Singletons;
 ````
 
@@ -41,21 +41,19 @@ using Foundation.Singletons;
 ### Why use the CRTP constraint?
 
 `SingletonBehaviour<T>` has the following type constraint:
-
-```csharp
+````csharp
 public abstract class SingletonBehaviour<T> : MonoBehaviour
     where T : SingletonBehaviour<T>
-```
+````
 
 This catches incorrect inheritance patterns at compile time:
-
-```csharp
+````csharp
 // ✅ Correct implementation
 public sealed class GameManager : SingletonBehaviour<GameManager> { }
 
 // ❌ Compile error (CS0311)
 public sealed class A : SingletonBehaviour<B> { }
-```
+````
 
 However, C# constraints alone cannot catch 100% of misuse cases (e.g., accidentally specifying a different type).
 Therefore, a **runtime guard** (`this as T` validation) is also used to detect issues early in production.
@@ -76,53 +74,62 @@ This separation of responsibilities is maintained.
 > Note: Unity has known cases where `[RuntimeInitializeOnLoadMethod]` inside generic types is not invoked as expected.
 > Centralizing initialization in a non-generic type is a practical workaround (see Issue Tracker).
 
+### How Play Session Detection Works
+
+Since `[RuntimeInitializeOnLoadMethod]` execution order is not guaranteed, this implementation uses `Time.realtimeSinceStartupAsDouble` to detect Play session boundaries.
+
+* `Time.realtimeSinceStartupAsDouble` resets to 0 when entering Play Mode
+* If the current value is less than the previously recorded value, a new Play session is detected
+* This approach enables robust design that does not depend on initialization method call order
+
 ## Dependencies 🔍
 
-| API                                                          | Default Behavior                                                                                |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| API                                                          | Default Behavior                                                                                        |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | `Object.FindAnyObjectByType<T>(FindObjectsInactive.Exclude)` | **Does not return assets / inactive objects / `HideFlags.DontSave`** (return value not guaranteed across calls) |
-| `Object.DontDestroyOnLoad()`                                 | **Only works on root GameObjects (or components on root GameObjects)**                          |
-| `Application.quitting`                                       | **Invoked when exiting Play Mode in Editor**. May not be detected during pause on Android       |
-| `RuntimeInitializeLoadType.SubsystemRegistration`            | **Called before the first scene is loaded**                                                     |
-| Domain Reload disabled                                       | **Static field values / static event handlers persist across Play sessions**                    |
-| Scene Reload disabled                                        | **`OnEnable` / `OnDisable` / `OnDestroy` etc. are called as if newly loaded**                   |
+| `Object.DontDestroyOnLoad()`                                 | **Only works on root GameObjects (or components on root GameObjects)**                                  |
+| `Application.quitting`                                       | **Invoked when exiting Play Mode in Editor**. May not be detected during pause on Android               |
+| `RuntimeInitializeLoadType.SubsystemRegistration`            | **Called before the first scene is loaded** (execution order is undefined)                              |
+| `Time.realtimeSinceStartupAsDouble`                          | **Resets to 0 when entering Play Mode**. Used for Play session detection                                |
+| `Application.isPlaying`                                      | **`true` in Play Mode, `false` in Edit Mode**                                                           |
+| Domain Reload disabled                                       | **Static field values / static event handlers persist across Play sessions**                            |
+| Scene Reload disabled                                        | **`OnEnable` / `OnDisable` / `OnDestroy` etc. are called as if newly loaded**                           |
 
 ## Public API 📌
 
 ### `static T Instance { get; }`
 
 For mandatory dependencies. Returns the singleton instance. If missing, **searches → auto-creates if not found**. Returns `null` while quitting.
-
-```csharp
+````csharp
 GameManager.Instance.AddScore(10);
-```
+````
 
-| State           | Result                       |
-| --------------- | ---------------------------- |
-| Instance exists | Cached instance              |
-| Missing         | Search → create if not found |
-| Quitting        | `null`                       |
+| State           | Result                            |
+| --------------- | --------------------------------- |
+| Instance exists | Cached instance                   |
+| Missing         | Search → create if not found      |
+| Quitting        | `null`                            |
+| Edit Mode       | Search only (no create, no cache) |
 
 ### `static bool TryGetInstance(out T instance)`
 
 For optional dependencies. Returns the instance if it exists. **Never creates one**. Returns `false` while quitting.
-
-```csharp
+````csharp
 if (AudioManager.TryGetInstance(out var am))
 {
     am.PlaySe("click");
 }
-```
+````
 
-| State           | Return  | `instance`      |
-| --------------- | ------- | --------------- |
-| Instance exists | `true`  | Valid reference |
-| Missing         | `false` | `null`          |
-| Quitting        | `false` | `null`          |
+| State           | Return        | `instance`             |
+| --------------- | ------------- | ---------------------- |
+| Instance exists | `true`        | Valid reference        |
+| Missing         | `false`       | `null`                 |
+| Quitting        | `false`       | `null`                 |
+| Edit Mode       | Search result | Search only (no cache) |
 
 **Typical use case: prevent "accidental creation" during teardown 🧹**
-
-```csharp
+````csharp
 private void OnDisable()
 {
     if (AudioManager.TryGetInstance(out var am))
@@ -130,13 +137,12 @@ private void OnDisable()
         am.Unregister(this);
     }
 }
-```
+````
 
 ## Usage 🚀
 
 ### 1) Defining a derived singleton
-
-```csharp
+````csharp
 using Foundation.Singletons;
 
 public sealed class GameManager : SingletonBehaviour<GameManager>
@@ -156,13 +162,13 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
         // Cleanup when actually destroyed (resource release, event unsubscription, etc.)
     }
 }
-```
+````
 
-| Item           | Recommendation                                            |
-| -------------- | --------------------------------------------------------- |
-| Class modifier | `sealed` (prevents unintended inheritance)                |
-| Initialization | Put in `OnSingletonAwake()` (re-initialization per Play)  |
-| Cleanup        | Put in `OnSingletonDestroy()` (destruction only)          |
+| Item           | Recommendation                                           |
+| -------------- | -------------------------------------------------------- |
+| Class modifier | `sealed` (prevents unintended inheritance)               |
+| Initialization | Put in `OnSingletonAwake()` (re-initialization per Play) |
+| Cleanup        | Put in `OnSingletonDestroy()` (destruction only)         |
 
 ---
 
@@ -181,8 +187,7 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
 ❌ Calling `Instance` every frame is not recommended. Because a Find operation may occur, the standard practice is to get it once, cache the reference, and reuse it.
 
 ✅ Recommended: acquire once and cache
-
-```csharp
+````csharp
 using Foundation.Singletons;
 using UnityEngine;
 
@@ -201,7 +206,7 @@ public sealed class ScoreHUD : MonoBehaviour
         // use this._gm.Score
     }
 }
-```
+````
 
 ## Soft Reset (Safe Re-initialization Per Play Session) 🧼
 
@@ -231,14 +236,13 @@ Use `OnSingletonAwake()` for initialization and `OnSingletonDestroy()` for clean
 ### ❌ Type parameter must be the class itself
 
 The CRTP constraint causes the following incorrect inheritance to produce a compile error:
-
-```csharp
+````csharp
 // ❌ Compile error
 public sealed class A : SingletonBehaviour<B> { }
 
 // ✅ Correct implementation
 public sealed class A : SingletonBehaviour<A> { }
-```
+````
 
 ## Scene Placement Notes 🧱
 
@@ -250,6 +254,17 @@ public sealed class A : SingletonBehaviour<A> { }
 This implementation automatically reparents a child-placed singleton to root and persists it.
 Since unintended moves can be confusing, emitting a warning only in **Editor/Development builds** is a reasonable approach (and matches this implementation).
 
+## Edit Mode Behavior 🖥️
+
+In Edit Mode (`Application.isPlaying == false`), the following behavior applies:
+
+* `Instance` / `TryGetInstance` perform **search only** (`FindAnyObjectByType`)
+* **No auto-creation**
+* **No static cache updates** (zero side effects)
+* **No impact on Play session state**
+
+This allows safe singleton access from editor scripts and custom inspectors.
+
 ## Threading / Main Thread 🧵
 
 `Instance` / `TryGetInstance` call UnityEngine APIs internally (Find / GameObject creation, etc.).
@@ -258,8 +273,7 @@ Call them from the **main thread**.
 ## Initialization Order ⏱️
 
 If dependency order becomes complex, you can pin it with a Bootstrap pattern:
-
-```csharp
+````csharp
 using Foundation.Singletons;
 using UnityEngine;
 
@@ -273,7 +287,7 @@ public sealed class Bootstrap : MonoBehaviour
         _ = InputManager.Instance;
     }
 }
-```
+````
 
 ## IDE Configuration (Rider / ReSharper) 🧰
 
@@ -320,6 +334,15 @@ Remove `Awake` and use `OnSingletonAwake()` instead (same for `OnEnable` / `OnDe
 The CRTP constraint causes a compile error (CS0311). Always specify the class itself as the type parameter.
 Additionally, runtime guards detect misuse early even if it somehow compiles.
 
+### Q. Is it safe to call `Instance` in Edit Mode?
+
+Yes. In Edit Mode, only search is performed with no static cache updates or auto-creation.
+
+### Q. Why does it work even though `RuntimeInitializeOnLoadMethod` execution order is undefined?
+
+By utilizing the property that `Time.realtimeSinceStartupAsDouble` resets when entering Play Mode,
+Play session boundaries are detected without depending on initialization method call order.
+
 ## References 📚
 
 ### Unity Scripting API / Manual
@@ -332,6 +355,10 @@ Additionally, runtime guards detect misuse early even if it somehow compiles.
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeOnLoadMethodAttribute.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeOnLoadMethodAttribute.html)
 * RuntimeInitializeLoadType.SubsystemRegistration
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeLoadType.SubsystemRegistration.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeLoadType.SubsystemRegistration.html)
+* Time.realtimeSinceStartupAsDouble
+  [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-realtimeSinceStartupAsDouble.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-realtimeSinceStartupAsDouble.html)
+* Application.isPlaying
+  [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-isPlaying.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-isPlaying.html)
 * Object.FindAnyObjectByType
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Object.FindAnyObjectByType.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Object.FindAnyObjectByType.html)
 * Object.DontDestroyOnLoad

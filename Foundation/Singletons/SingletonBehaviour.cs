@@ -3,21 +3,8 @@ using UnityEngine;
 namespace Foundation.Singletons
 {
     /// <summary>
-    /// Type-per-singleton base class for <see cref="MonoBehaviour"/>.
-    /// Provides <see cref="Instance"/> (auto-create) and <see cref="TryGetInstance(out T)"/> (no-create),
-    /// persists across scene loads via <see cref="Object.DontDestroyOnLoad(Object)"/>,
-    /// and remains correct when Domain Reload is disabled.
+    /// Type-per-singleton base class for MonoBehaviour with soft reset per Play session.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Override <see cref="OnSingletonAwake"/> / <see cref="OnSingletonDestroy"/> for custom logic.
-    /// Do not declare Awake, OnEnable, or OnDestroy in derived classes.
-    /// </para>
-    /// <para>
-    /// Lookup excludes inactive objects and assets.
-    /// Re-initializes once per Play session even if the instance survives (Scene Reload disabled).
-    /// </para>
-    /// </remarks>
     public abstract class SingletonBehaviour<T> : MonoBehaviour where T : SingletonBehaviour<T>
     {
         private const int UninitializedPlaySessionId = -1;
@@ -29,24 +16,27 @@ namespace Foundation.Singletons
         // ReSharper disable once StaticMemberInGenericType
         private static int _cachedPlaySessionId = UninitializedPlaySessionId;
 
-        // Instance-level per-Play initialization marker (soft reset).
         private int _initializedPlaySessionId = UninitializedPlaySessionId;
 
         /// <summary>
-        /// Mandatory access point: returns the singleton instance.
-        /// If no instance exists in the loaded scene, it auto-creates one.
-        /// Returns null while the application is quitting.
+        /// Returns the singleton instance. Auto-creates if missing (Play Mode only).
+        /// Returns null while quitting.
         /// </summary>
         public static T Instance
         {
             get
             {
+                if (!Application.isPlaying)
+                {
+                    return Object.FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
+                }
+
                 EnsurePlaySession();
 
                 if (SingletonRuntime.IsQuitting) return null;
                 if (_instance != null) return _instance;
 
-                _instance = FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
+                _instance = Object.FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
                 if (_instance != null) return _instance;
 
                 var go = new GameObject(name: typeof(T).Name);
@@ -56,12 +46,17 @@ namespace Foundation.Singletons
         }
 
         /// <summary>
-        /// Optional access point: does not create an instance.
-        /// If an instance exists in the loaded scene, it caches it into <paramref name="instance"/> and returns true.
-        /// Returns false while the application is quitting, or when no instance exists.
+        /// Gets the singleton instance without creating one.
+        /// Returns false while quitting or when no instance exists.
         /// </summary>
         public static bool TryGetInstance(out T instance)
         {
+            if (!Application.isPlaying)
+            {
+                instance = Object.FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
+                return instance != null;
+            }
+
             EnsurePlaySession();
 
             if (SingletonRuntime.IsQuitting)
@@ -76,12 +71,11 @@ namespace Foundation.Singletons
                 return true;
             }
 
-            _instance = FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
+            _instance = Object.FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
             instance = _instance;
             return instance != null;
         }
 
-        // Unity message methods: keep them non-public; Unity invokes them by name.
         private void Awake()
         {
             if (!Application.isPlaying) return;
@@ -96,29 +90,52 @@ namespace Foundation.Singletons
             this.TryInitializeForCurrentPlaySession();
         }
 
+        private void OnDestroy()
+        {
+            if (!ReferenceEquals(objA: _instance, objB: this)) return;
+
+            _instance = null;
+            this.OnSingletonDestroy();
+        }
+
         /// <summary>
-        /// Establishes the singleton instance and performs per-Play-session initialization (soft reset).
+        /// Called once per Play session after singleton is established.
         /// </summary>
+        protected virtual void OnSingletonAwake()
+        {
+        }
+
+        /// <summary>
+        /// Called when singleton instance is destroyed.
+        /// </summary>
+        protected virtual void OnSingletonDestroy()
+        {
+        }
+
         private void TryInitializeForCurrentPlaySession()
         {
-            // Do not (re)bind or persist during shutdown / Play Mode exit.
+            EnsurePlaySession();
+
             if (SingletonRuntime.IsQuitting)
             {
                 Destroy(obj: this.gameObject);
                 return;
             }
 
-            // New Play session must take precedence (Domain Reload disabled-safe).
-            EnsurePlaySession();
+            if (_instance != null && !ReferenceEquals(objA: _instance, objB: this))
+            {
+                Destroy(obj: this.gameObject);
+                return;
+            }
 
-            // CRTP-like misuse guard (runtime).
+            // CRTP constraint covers most cases, but intermediate base classes can bypass it.
             var typedThis = this as T;
             if (typedThis == null)
             {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogError(
-                    message:
-                    $"[{this.GetType().Name}] must inherit SingletonBehaviour<{this.GetType().Name}>, not SingletonBehaviour<{typeof(T).Name}>.",
+                    message: $"[{this.GetType().Name}] must inherit SingletonBehaviour<{this.GetType().Name}>, " +
+                             $"not SingletonBehaviour<{typeof(T).Name}>.",
                     context: this
                 );
 #endif
@@ -126,19 +143,12 @@ namespace Foundation.Singletons
                 return;
             }
 
-            // Duplicate rejection (after possible invalidation).
-            if (_instance != null && !ReferenceEquals(objA: _instance, objB: this))
-            {
-                Destroy(obj: this.gameObject);
-                return;
-            }
-
             _instance = typedThis;
 
-            // Soft reset: run once per Play session, even for the same surviving object.
-            if (this._initializedPlaySessionId == SingletonRuntime.PlaySessionId) return;
+            var currentPlaySessionId = SingletonRuntime.PlaySessionId;
+            if (this._initializedPlaySessionId == currentPlaySessionId) return;
 
-            // DontDestroyOnLoad only works for root GameObjects (or components on root GameObjects).
+            // DontDestroyOnLoad requires root.
             if (this.transform.parent != null)
             {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -152,39 +162,16 @@ namespace Foundation.Singletons
 
             DontDestroyOnLoad(target: this.gameObject);
 
-            // Mark first to prevent double-run via Awake + OnEnable re-entrancy in the same Play session.
-            this._initializedPlaySessionId = SingletonRuntime.PlaySessionId;
+            this._initializedPlaySessionId = currentPlaySessionId;
             this.OnSingletonAwake();
         }
 
-        /// <summary>
-        /// Customization hook called once per Play session after the singleton is established and made persistent.
-        /// </summary>
-        protected virtual void OnSingletonAwake()
-        {
-        }
-
-        private void OnDestroy()
-        {
-            if (!ReferenceEquals(objA: _instance, objB: this)) return;
-
-            _instance = null;
-            this.OnSingletonDestroy();
-        }
-
-        /// <summary>
-        /// Customization hook called only when the established singleton instance is being destroyed.
-        /// </summary>
-        protected virtual void OnSingletonDestroy()
-        {
-        }
-
-        /// <summary>
-        /// Syncs the cached Play session id with <see cref="SingletonRuntime.PlaySessionId"/>.
-        /// If the Play session changed (e.g., Domain Reload disabled), invalidates the cached instance.
-        /// </summary>
         private static void EnsurePlaySession()
         {
+            if (!Application.isPlaying) return;
+
+            SingletonRuntime.EnsureInitializedForCurrentPlaySession();
+
             var current = SingletonRuntime.PlaySessionId;
             if (_cachedPlaySessionId == current) return;
 

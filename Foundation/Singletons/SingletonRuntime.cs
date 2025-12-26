@@ -3,48 +3,54 @@ using UnityEngine;
 namespace Foundation.Singletons
 {
     /// <summary>
-    /// Central runtime lifecycle for singleton infrastructure.
-    /// Owns Play session initialization and quitting state.
+    /// Manages Play session state for singleton infrastructure.
     /// </summary>
-    /// <remarks>
-    /// Initialization runs at <see cref="RuntimeInitializeLoadType.SubsystemRegistration"/>,
-    /// i.e., before the first scene is loaded.
-    /// </remarks>
     public static class SingletonRuntime
     {
         /// <summary>
-        /// Increments on each runtime startup (including entering Play Mode).
-        /// Used to invalidate cached singleton statics when Domain Reload is disabled.
+        /// Increments once per Play session. Used to invalidate singleton caches.
         /// </summary>
         public static int PlaySessionId { get; private set; }
 
         /// <summary>
-        /// True while the application is quitting (or exiting Play Mode in the Editor).
+        /// True while the application is quitting.
         /// </summary>
         public static bool IsQuitting { get; private set; }
 
-        /// <summary>
-        /// Initializes singleton runtime state at <see cref="RuntimeInitializeLoadType.SubsystemRegistration"/>.
-        /// Increments <see cref="PlaySessionId"/>, clears <see cref="IsQuitting"/>, and (re)subscribes to
-        /// <see cref="Application.quitting"/> to avoid duplicate handlers when Domain Reload is disabled.
-        /// </summary>
+        // Time.realtimeSinceStartupAsDouble resets to 0 when entering Play Mode.
+        // Used to detect new Play session even when static state persists (Domain Reload disabled).
+        private static double _lastRealtimeSinceStartup = double.PositiveInfinity;
+        private static bool _hasEverInitialized;
+
         [RuntimeInitializeOnLoadMethod(loadType: RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void Initialize()
-        {
-            if (PlaySessionId < int.MaxValue) PlaySessionId++;
-
-            IsQuitting = false;
-
-            Application.quitting -= OnQuitting;
-            Application.quitting += OnQuitting;
-        }
+        private static void Initialize() => EnsureInitializedForCurrentPlaySession();
 
         /// <summary>
-        /// Marks the runtime as quitting to prevent late singleton creation during shutdown.
+        /// Ensures runtime state is initialized. Idempotent.
         /// </summary>
-        private static void OnQuitting()
+        internal static void EnsureInitializedForCurrentPlaySession()
         {
-            IsQuitting = true;
+            if (!Application.isPlaying) return;
+
+            var now = Time.realtimeSinceStartupAsDouble;
+            var isNewSession = now < _lastRealtimeSinceStartup;
+
+            if (!_hasEverInitialized || isNewSession)
+            {
+                _hasEverInitialized = true;
+
+                if (PlaySessionId < int.MaxValue) PlaySessionId++;
+
+                IsQuitting = false;
+
+                // Unsubscribe first: Domain Reload disabled keeps static event subscribers.
+                Application.quitting -= OnQuitting;
+                Application.quitting += OnQuitting;
+            }
+
+            _lastRealtimeSinceStartup = now;
         }
+
+        private static void OnQuitting() => IsQuitting = true;
     }
 }

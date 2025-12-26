@@ -18,6 +18,7 @@ Unity 6.3（6000.3 系）以降での利用を想定しています。
 - ⚙️ **Domain Reload 無効対応**（Play セッション識別子で型ごとの static キャッシュを無効化）
 - 🧱 **誤配置への実用的な耐性**（子オブジェクト配置でも root に移動して永続化）
 - 🧼 **ソフトリセット指向**（Play ごとに `OnSingletonAwake()` を走らせ、同一個体でも再初期化できる設計）
+- 🖥️ **Edit Mode 安全**（Edit Mode では検索のみ、static キャッシュに副作用なし）
 
 ## Requirements ✅
 
@@ -31,8 +32,7 @@ Unity 6.3（6000.3 系）以降での利用を想定しています。
 - 名前空間はプロジェクト方針に合わせて調整してください。
 
 ### 名前空間のインポート
-
-```csharp
+````csharp
 using Foundation.Singletons;
 ````
 
@@ -41,21 +41,19 @@ using Foundation.Singletons;
 ### なぜ CRTP 制約を使うのか？
 
 `SingletonBehaviour<T>` は以下の型制約を持ちます：
-
-```csharp
+````csharp
 public abstract class SingletonBehaviour<T> : MonoBehaviour
     where T : SingletonBehaviour<T>
-```
+````
 
 これにより、誤った継承パターンがコンパイル時に検出されます：
-
-```csharp
+````csharp
 // ✅ 正しい実装
 public sealed class GameManager : SingletonBehaviour<GameManager> { }
 
 // ❌ コンパイルエラー（CS0311）
 public sealed class A : SingletonBehaviour<B> { }
-```
+````
 
 ただし C# の制約だけでは「誤って別型を指定した」などのケースを 100% 防ぎ切れないため、
 **ランタイムガード**（`this as T` の検証）も併用して、運用上の事故を早期に検出します。
@@ -64,7 +62,7 @@ public sealed class A : SingletonBehaviour<B> { }
 
 Domain Reload を無効化すると、**static フィールドや static イベントのハンドラが Play 間で残留**し得ます。
 
-この “残留” を前提に、Play セッションの開始ごとに **型ごとの static キャッシュを無効化**する必要があります。
+この "残留" を前提に、Play セッションの開始ごとに **型ごとの static キャッシュを無効化**する必要があります。
 
 そのため、
 
@@ -76,6 +74,14 @@ Domain Reload を無効化すると、**static フィールドや static イベ�
 > 補足：Unity では「ジェネリック型内の `[RuntimeInitializeOnLoadMethod]` が期待どおり呼ばれない」ケースが知られており、
 > その回避として非ジェネリック側に初期化を集約する設計は実用上有効です（Issue Tracker 参照）。
 
+### Play セッション検出の仕組み
+
+`[RuntimeInitializeOnLoadMethod]` の実行順は保証されないため、本実装では `Time.realtimeSinceStartupAsDouble` を利用して Play セッションの境界を検出します。
+
+* `Time.realtimeSinceStartupAsDouble` は Play Mode 開始時に 0 にリセットされる
+* 前回記録した値より小さい場合、新しい Play セッションと判定
+* この方式により、初期化メソッドの呼び出し順に依存しない堅牢な設計を実現
+
 ## Dependencies（本実装が依存する Unity API の挙動）🔍
 
 | API                                                          | 挙動（デフォルト）                                                          |
@@ -83,46 +89,47 @@ Domain Reload を無効化すると、**static フィールドや static イベ�
 | `Object.FindAnyObjectByType<T>(FindObjectsInactive.Exclude)` | **Assets / 非アクティブ / `HideFlags.DontSave` を返さない**（戻り値は呼び出し間で保証されない） |
 | `Object.DontDestroyOnLoad()`                                 | **root GameObject（または root 上の Component）でのみ有効**                    |
 | `Application.quitting`                                       | **Editor の Play Mode 終了時にも発火**。Android では pause 中に検出されない場合がある      |
-| `RuntimeInitializeLoadType.SubsystemRegistration`            | **最初のシーンロード前**に呼ばれる                                                |
+| `RuntimeInitializeLoadType.SubsystemRegistration`            | **最初のシーンロード前**に呼ばれる（ただし実行順は不定）                                     |
+| `Time.realtimeSinceStartupAsDouble`                          | **Play Mode 開始時に 0 にリセット**。Play セッション検出に利用                         |
+| `Application.isPlaying`                                      | **Play Mode では `true`、Edit Mode では `false`**                       |
 | Domain Reload 無効                                             | **static フィールド値 / static イベントハンドラが Play 間で残留**                     |
-| Scene Reload 無効                                              | **`OnEnable` / `OnDisable` / `OnDestroy` 等は “新規ロード同様に呼ばれる”**       |
+| Scene Reload 無効                                              | **`OnEnable` / `OnDisable` / `OnDestroy` 等は "新規ロード同様に呼ばれる"**       |
 
 ## Public API 📌
 
 ### `static T Instance { get; }`
 
 必須依存向け。シングルトンインスタンスを返します。未存在の場合は **検索 → 無ければ自動生成**します。終了中（quitting）は `null` を返します。
-
-```csharp
+````csharp
 GameManager.Instance.AddScore(10);
-```
+````
 
 | 状態         | 戻り値             |
 | ---------- | --------------- |
 | インスタンス存在   | キャッシュ済みインスタンス   |
 | 未存在        | 検索 → 無ければ生成して返却 |
 | quitting 中 | `null`          |
+| Edit Mode  | 検索のみ（生成・キャッシュなし） |
 
 ### `static bool TryGetInstance(out T instance)`
 
 任意依存向け。インスタンスが存在すれば取得します。**生成は行いません**。終了中（quitting）も `false` を返します。
-
-```csharp
+````csharp
 if (AudioManager.TryGetInstance(out var am))
 {
     am.PlaySe("click");
 }
-```
+````
 
 | 状態         | 戻り値     | `instance` |
 | ---------- | ------- | ---------- |
 | インスタンス存在   | `true`  | 有効な参照      |
 | 未存在        | `false` | `null`     |
 | quitting 中 | `false` | `null`     |
+| Edit Mode  | 検索結果    | 検索のみ（キャッシュなし） |
 
 **典型ユースケース：終了処理での「うっかり生成」を防止 🧹**
-
-```csharp
+````csharp
 private void OnDisable()
 {
     if (AudioManager.TryGetInstance(out var am))
@@ -130,13 +137,12 @@ private void OnDisable()
         am.Unregister(this);
     }
 }
-```
+````
 
 ## Usage 🚀
 
 ### 1) 派生クラスの定義
-
-```csharp
+````csharp
 using Foundation.Singletons;
 
 public sealed class GameManager : SingletonBehaviour<GameManager>
@@ -156,7 +162,7 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
         // 本当に破棄されるタイミングでの後始末（リソース解放、イベント解除など）
     }
 }
-```
+````
 
 | 項目     | 推奨                                     |
 | ------ | -------------------------------------- |
@@ -181,8 +187,7 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
 ❌ **毎フレーム `Instance` を呼ぶのは非推奨**です。探索が走る可能性があるため、初回に取得してキャッシュし、以降は参照を使うのが基本です。
 
 ✅ 推奨：初回に取得してキャッシュ
-
-```csharp
+````csharp
 using Foundation.Singletons;
 using UnityEngine;
 
@@ -201,7 +206,7 @@ public sealed class ScoreHUD : MonoBehaviour
         // this._gm.Score を使用
     }
 }
-```
+````
 
 ## Soft Reset（Playごとの安全な再初期化）🧼
 
@@ -231,14 +236,13 @@ Domain Reload 無効では static 状態や static イベント購読が残留�
 ### ❌ 型パラメータには自分自身を指定する
 
 CRTP 制約により、以下のような誤った継承はコンパイルエラーになります：
-
-```csharp
+````csharp
 // ❌ コンパイルエラー
 public sealed class A : SingletonBehaviour<B> { }
 
 // ✅ 正しい実装
 public sealed class A : SingletonBehaviour<A> { }
-```
+````
 
 ## Scene Placement Notes 🧱
 
@@ -250,6 +254,17 @@ public sealed class A : SingletonBehaviour<A> { }
 本実装は、誤って子オブジェクトに配置された場合でも **自動で root に移動**して永続化します。
 ただし意図しない移動は混乱の元になり得るため、**Editor/Development ビルドのみ**警告ログを出す運用が合理的です（本実装もその方針）。
 
+## Edit Mode Behavior 🖥️
+
+Edit Mode（`Application.isPlaying == false`）では以下の動作になります：
+
+* `Instance` / `TryGetInstance` は **検索のみ**実行（`FindAnyObjectByType`）
+* **自動生成しない**
+* **static キャッシュを更新しない**（副作用ゼロ）
+* **Play セッション状態に影響しない**
+
+これにより、エディタスクリプトやカスタムインスペクタから安全にシングルトンを参照できます。
+
 ## Threading / Main Thread（重要）🧵
 
 `Instance` / `TryGetInstance` は内部で UnityEngine API（Find / GameObject 生成など）を呼びます。
@@ -258,8 +273,7 @@ public sealed class A : SingletonBehaviour<A> { }
 ## Initialization Order（初期化順の固定が必要な場合）⏱️
 
 依存関係が複雑な場合、Bootstrap で順序を固定できます。
-
-```csharp
+````csharp
 using Foundation.Singletons;
 using UnityEngine;
 
@@ -273,7 +287,7 @@ public sealed class Bootstrap : MonoBehaviour
         _ = InputManager.Instance;
     }
 }
-```
+````
 
 ## IDE Configuration（Rider / ReSharper）🧰
 
@@ -320,6 +334,15 @@ public sealed class Bootstrap : MonoBehaviour
 CRTP 制約によりコンパイルエラー（CS0311）になります。型パラメータには必ず自分自身のクラスを指定してください。
 加えて、ランタイムでも誤用検出（ガード）により早期に異常を検出します。
 
+### Q. Edit Mode で `Instance` を呼んでも安全？
+
+安全です。Edit Mode では検索のみ行い、static キャッシュの更新や自動生成は行いません。
+
+### Q. `RuntimeInitializeOnLoadMethod` の実行順が不定なのに、なぜ動く？
+
+`Time.realtimeSinceStartupAsDouble` が Play Mode 開始時にリセットされる性質を利用して、
+初期化メソッドの呼び出し順に依存せず Play セッションの境界を検出しています。
+
 ## References 📚
 
 ### Unity Scripting API / Manual
@@ -332,6 +355,10 @@ CRTP 制約によりコンパイルエラー（CS0311）になります。型パ
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeOnLoadMethodAttribute.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeOnLoadMethodAttribute.html)
 * RuntimeInitializeLoadType.SubsystemRegistration
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeLoadType.SubsystemRegistration.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeLoadType.SubsystemRegistration.html)
+* Time.realtimeSinceStartupAsDouble
+  [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-realtimeSinceStartupAsDouble.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-realtimeSinceStartupAsDouble.html)
+* Application.isPlaying
+  [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-isPlaying.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-isPlaying.html)
 * Object.FindAnyObjectByType
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Object.FindAnyObjectByType.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Object.FindAnyObjectByType.html)
 * Object.DontDestroyOnLoad
