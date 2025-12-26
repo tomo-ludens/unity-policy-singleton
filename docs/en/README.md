@@ -32,28 +32,28 @@ Intended for use with Unity 6.3 (6000.3 series) or later.
 - Adjust the namespace according to your project conventions.
 
 ### Namespace Import
-````csharp
+```csharp
 using Foundation.Singletons;
-````
+```
 
 ## Design Intent 🧠
 
 ### Why use the CRTP constraint?
 
 `SingletonBehaviour<T>` has the following type constraint:
-````csharp
+```csharp
 public abstract class SingletonBehaviour<T> : MonoBehaviour
     where T : SingletonBehaviour<T>
-````
+```
 
 This catches incorrect inheritance patterns at compile time:
-````csharp
+```csharp
 // ✅ Correct implementation
 public sealed class GameManager : SingletonBehaviour<GameManager> { }
 
 // ❌ Compile error (CS0311)
 public sealed class A : SingletonBehaviour<B> { }
-````
+```
 
 However, C# constraints alone cannot catch 100% of misuse cases (e.g., accidentally specifying a different type).
 Therefore, a **runtime guard** (`this as T` validation) is also used to detect issues early in production.
@@ -82,6 +82,11 @@ Since `[RuntimeInitializeOnLoadMethod]` execution order is not guaranteed, this 
 * If the current value is less than the previously recorded value, a new Play session is detected
 * This approach enables robust design that does not depend on initialization method call order
 
+### DontDestroyOnLoad Call Management
+
+While calling `DontDestroyOnLoad` multiple times on the same object is harmless,
+this implementation uses the `_isPersistent` flag to limit the call to once, avoiding unnecessary processing.
+
 ## Dependencies 🔍
 
 | API                                                          | Default Behavior                                                                                        |
@@ -100,9 +105,9 @@ Since `[RuntimeInitializeOnLoadMethod]` execution order is not guaranteed, this 
 ### `static T Instance { get; }`
 
 For mandatory dependencies. Returns the singleton instance. If missing, **searches → auto-creates if not found**. Returns `null` while quitting.
-````csharp
+```csharp
 GameManager.Instance.AddScore(10);
-````
+```
 
 | State           | Result                            |
 | --------------- | --------------------------------- |
@@ -114,12 +119,12 @@ GameManager.Instance.AddScore(10);
 ### `static bool TryGetInstance(out T instance)`
 
 For optional dependencies. Returns the instance if it exists. **Never creates one**. Returns `false` while quitting.
-````csharp
+```csharp
 if (AudioManager.TryGetInstance(out var am))
 {
     am.PlaySe("click");
 }
-````
+```
 
 | State           | Return        | `instance`             |
 | --------------- | ------------- | ---------------------- |
@@ -129,7 +134,7 @@ if (AudioManager.TryGetInstance(out var am))
 | Edit Mode       | Search result | Search only (no cache) |
 
 **Typical use case: prevent "accidental creation" during teardown 🧹**
-````csharp
+```csharp
 private void OnDisable()
 {
     if (AudioManager.TryGetInstance(out var am))
@@ -137,12 +142,12 @@ private void OnDisable()
         am.Unregister(this);
     }
 }
-````
+```
 
 ## Usage 🚀
 
 ### 1) Defining a derived singleton
-````csharp
+```csharp
 using Foundation.Singletons;
 
 public sealed class GameManager : SingletonBehaviour<GameManager>
@@ -162,7 +167,7 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
         // Cleanup when actually destroyed (resource release, event unsubscription, etc.)
     }
 }
-````
+```
 
 | Item           | Recommendation                                           |
 | -------------- | -------------------------------------------------------- |
@@ -187,7 +192,7 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
 ❌ Calling `Instance` every frame is not recommended. Because a Find operation may occur, the standard practice is to get it once, cache the reference, and reuse it.
 
 ✅ Recommended: acquire once and cache
-````csharp
+```csharp
 using Foundation.Singletons;
 using UnityEngine;
 
@@ -206,7 +211,7 @@ public sealed class ScoreHUD : MonoBehaviour
         // use this._gm.Score
     }
 }
-````
+```
 
 ## Soft Reset (Safe Re-initialization Per Play Session) 🧼
 
@@ -236,13 +241,13 @@ Use `OnSingletonAwake()` for initialization and `OnSingletonDestroy()` for clean
 ### ❌ Type parameter must be the class itself
 
 The CRTP constraint causes the following incorrect inheritance to produce a compile error:
-````csharp
+```csharp
 // ❌ Compile error
 public sealed class A : SingletonBehaviour<B> { }
 
 // ✅ Correct implementation
 public sealed class A : SingletonBehaviour<A> { }
-````
+```
 
 ## Scene Placement Notes 🧱
 
@@ -273,7 +278,7 @@ Call them from the **main thread**.
 ## Initialization Order ⏱️
 
 If dependency order becomes complex, you can pin it with a Bootstrap pattern:
-````csharp
+```csharp
 using Foundation.Singletons;
 using UnityEngine;
 
@@ -287,7 +292,7 @@ public sealed class Bootstrap : MonoBehaviour
         _ = InputManager.Instance;
     }
 }
-````
+```
 
 ## IDE Configuration (Rider / ReSharper) 🧰
 

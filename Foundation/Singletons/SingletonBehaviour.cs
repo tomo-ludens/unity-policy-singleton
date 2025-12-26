@@ -17,6 +17,7 @@ namespace Foundation.Singletons
         private static int _cachedPlaySessionId = UninitializedPlaySessionId;
 
         private int _initializedPlaySessionId = UninitializedPlaySessionId;
+        private bool _isPersistent;
 
         /// <summary>
         /// Returns the singleton instance. Auto-creates if missing (Play Mode only).
@@ -122,10 +123,25 @@ namespace Foundation.Singletons
                 return;
             }
 
-            if (_instance != null && !ReferenceEquals(objA: _instance, objB: this))
+            if (!this.TryEstablishAsInstance()) return;
+
+            var currentPlaySessionId = SingletonRuntime.PlaySessionId;
+            if (this._initializedPlaySessionId == currentPlaySessionId) return;
+
+            this.EnsurePersistent();
+
+            this._initializedPlaySessionId = currentPlaySessionId;
+            this.OnSingletonAwake();
+        }
+
+        private bool TryEstablishAsInstance()
+        {
+            if (_instance != null)
             {
+                if (ReferenceEquals(objA: _instance, objB: this)) return true;
+
                 Destroy(obj: this.gameObject);
-                return;
+                return false;
             }
 
             // CRTP constraint covers most cases, but intermediate base classes can bypass it.
@@ -140,14 +156,15 @@ namespace Foundation.Singletons
                 );
 #endif
                 Destroy(obj: this.gameObject);
-                return;
+                return false;
             }
 
             _instance = typedThis;
+            return true;
+        }
 
-            var currentPlaySessionId = SingletonRuntime.PlaySessionId;
-            if (this._initializedPlaySessionId == currentPlaySessionId) return;
-
+        private void EnsurePersistent()
+        {
             // DontDestroyOnLoad requires root.
             if (this.transform.parent != null)
             {
@@ -160,10 +177,10 @@ namespace Foundation.Singletons
                 this.transform.SetParent(parent: null, worldPositionStays: true);
             }
 
-            DontDestroyOnLoad(target: this.gameObject);
+            if (this._isPersistent) return;
 
-            this._initializedPlaySessionId = currentPlaySessionId;
-            this.OnSingletonAwake();
+            DontDestroyOnLoad(target: this.gameObject);
+            this._isPersistent = true;
         }
 
         private static void EnsurePlaySession()

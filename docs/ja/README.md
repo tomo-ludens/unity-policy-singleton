@@ -32,28 +32,28 @@ Unity 6.3（6000.3 系）以降での利用を想定しています。
 - 名前空間はプロジェクト方針に合わせて調整してください。
 
 ### 名前空間のインポート
-````csharp
+```csharp
 using Foundation.Singletons;
-````
+```
 
 ## Design Intent（設計意図）🧠
 
 ### なぜ CRTP 制約を使うのか？
 
 `SingletonBehaviour<T>` は以下の型制約を持ちます：
-````csharp
+```csharp
 public abstract class SingletonBehaviour<T> : MonoBehaviour
     where T : SingletonBehaviour<T>
-````
+```
 
 これにより、誤った継承パターンがコンパイル時に検出されます：
-````csharp
+```csharp
 // ✅ 正しい実装
 public sealed class GameManager : SingletonBehaviour<GameManager> { }
 
 // ❌ コンパイルエラー（CS0311）
 public sealed class A : SingletonBehaviour<B> { }
-````
+```
 
 ただし C# の制約だけでは「誤って別型を指定した」などのケースを 100% 防ぎ切れないため、
 **ランタイムガード**（`this as T` の検証）も併用して、運用上の事故を早期に検出します。
@@ -82,6 +82,11 @@ Domain Reload を無効化すると、**static フィールドや static イベ�
 * 前回記録した値より小さい場合、新しい Play セッションと判定
 * この方式により、初期化メソッドの呼び出し順に依存しない堅牢な設計を実現
 
+### DontDestroyOnLoad の呼び出し管理
+
+`DontDestroyOnLoad` は同一オブジェクトに複数回呼んでも問題ありませんが、
+本実装では `_isPersistent` フラグで呼び出しを1回に制限し、不要な処理を回避しています。
+
 ## Dependencies（本実装が依存する Unity API の挙動）🔍
 
 | API                                                          | 挙動（デフォルト）                                                          |
@@ -100,9 +105,9 @@ Domain Reload を無効化すると、**static フィールドや static イベ�
 ### `static T Instance { get; }`
 
 必須依存向け。シングルトンインスタンスを返します。未存在の場合は **検索 → 無ければ自動生成**します。終了中（quitting）は `null` を返します。
-````csharp
+```csharp
 GameManager.Instance.AddScore(10);
-````
+```
 
 | 状態         | 戻り値             |
 | ---------- | --------------- |
@@ -114,12 +119,12 @@ GameManager.Instance.AddScore(10);
 ### `static bool TryGetInstance(out T instance)`
 
 任意依存向け。インスタンスが存在すれば取得します。**生成は行いません**。終了中（quitting）も `false` を返します。
-````csharp
+```csharp
 if (AudioManager.TryGetInstance(out var am))
 {
     am.PlaySe("click");
 }
-````
+```
 
 | 状態         | 戻り値     | `instance` |
 | ---------- | ------- | ---------- |
@@ -129,7 +134,7 @@ if (AudioManager.TryGetInstance(out var am))
 | Edit Mode  | 検索結果    | 検索のみ（キャッシュなし） |
 
 **典型ユースケース：終了処理での「うっかり生成」を防止 🧹**
-````csharp
+```csharp
 private void OnDisable()
 {
     if (AudioManager.TryGetInstance(out var am))
@@ -137,12 +142,12 @@ private void OnDisable()
         am.Unregister(this);
     }
 }
-````
+```
 
 ## Usage 🚀
 
 ### 1) 派生クラスの定義
-````csharp
+```csharp
 using Foundation.Singletons;
 
 public sealed class GameManager : SingletonBehaviour<GameManager>
@@ -162,7 +167,7 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
         // 本当に破棄されるタイミングでの後始末（リソース解放、イベント解除など）
     }
 }
-````
+```
 
 | 項目     | 推奨                                     |
 | ------ | -------------------------------------- |
@@ -187,7 +192,7 @@ public sealed class GameManager : SingletonBehaviour<GameManager>
 ❌ **毎フレーム `Instance` を呼ぶのは非推奨**です。探索が走る可能性があるため、初回に取得してキャッシュし、以降は参照を使うのが基本です。
 
 ✅ 推奨：初回に取得してキャッシュ
-````csharp
+```csharp
 using Foundation.Singletons;
 using UnityEngine;
 
@@ -206,7 +211,7 @@ public sealed class ScoreHUD : MonoBehaviour
         // this._gm.Score を使用
     }
 }
-````
+```
 
 ## Soft Reset（Playごとの安全な再初期化）🧼
 
@@ -236,13 +241,13 @@ Domain Reload 無効では static 状態や static イベント購読が残留�
 ### ❌ 型パラメータには自分自身を指定する
 
 CRTP 制約により、以下のような誤った継承はコンパイルエラーになります：
-````csharp
+```csharp
 // ❌ コンパイルエラー
 public sealed class A : SingletonBehaviour<B> { }
 
 // ✅ 正しい実装
 public sealed class A : SingletonBehaviour<A> { }
-````
+```
 
 ## Scene Placement Notes 🧱
 
@@ -273,7 +278,7 @@ Edit Mode（`Application.isPlaying == false`）では以下の動作になりま
 ## Initialization Order（初期化順の固定が必要な場合）⏱️
 
 依存関係が複雑な場合、Bootstrap で順序を固定できます。
-````csharp
+```csharp
 using Foundation.Singletons;
 using UnityEngine;
 
@@ -287,7 +292,7 @@ public sealed class Bootstrap : MonoBehaviour
         _ = InputManager.Instance;
     }
 }
-````
+```
 
 ## IDE Configuration（Rider / ReSharper）🧰
 

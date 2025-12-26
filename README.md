@@ -26,8 +26,7 @@ With Domain Reload disabled, `static` state can persist between play sessions, m
 - ✅ Domain Reload 無効（Enter Play Mode Options）でも安全な設計
 - ✅ Application.quitting を考慮した終了時の安全性
 - ✅ CRTP 風制約 + ランタイムガードで誤用を検出
-
-> 詳細設計・制約（Awake/OnDestroy の扱い、重複検出、生成ポリシー等）は各言語 README を参照してください。
+- ✅ Edit Mode では検索のみ（static キャッシュに副作用なし）
 
 ---
 - ✅ Type-per-singleton (SingletonBehaviour<T>)
@@ -36,6 +35,7 @@ With Domain Reload disabled, `static` state can persist between play sessions, m
 - ✅ Safe design even with Domain Reload disabled (Enter Play Mode Options)
 - ✅ Shutdown safety via Application.quitting
 - ✅ CRTP-style constraint + runtime guard to catch misuse
+- ✅ Edit Mode safe (search only, no side effects on static cache)
 
 > For design details and constraints (Awake/OnDestroy handling, duplicate detection, creation policy, etc.), see the language-specific READMEs.
 
