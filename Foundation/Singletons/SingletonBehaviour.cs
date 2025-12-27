@@ -32,7 +32,7 @@ namespace Foundation.Singletons
                     return Object.FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
                 }
 
-                EnsurePlaySession();
+                InvalidateInstanceCacheIfPlaySessionChanged();
 
                 if (SingletonRuntime.IsQuitting) return null;
                 if (_instance != null) return _instance;
@@ -58,7 +58,7 @@ namespace Foundation.Singletons
                 return instance != null;
             }
 
-            EnsurePlaySession();
+            InvalidateInstanceCacheIfPlaySessionChanged();
 
             if (SingletonRuntime.IsQuitting)
             {
@@ -81,14 +81,14 @@ namespace Foundation.Singletons
         {
             if (!Application.isPlaying) return;
 
-            this.TryInitializeForCurrentPlaySession();
+            this.InitializeForCurrentPlaySessionIfNeeded();
         }
 
         private void OnEnable()
         {
             if (!Application.isPlaying) return;
 
-            this.TryInitializeForCurrentPlaySession();
+            this.InitializeForCurrentPlaySessionIfNeeded();
         }
 
         private void OnDestroy()
@@ -113,9 +113,9 @@ namespace Foundation.Singletons
         {
         }
 
-        private void TryInitializeForCurrentPlaySession()
+        private void InitializeForCurrentPlaySessionIfNeeded()
         {
-            EnsurePlaySession();
+            InvalidateInstanceCacheIfPlaySessionChanged();
 
             if (SingletonRuntime.IsQuitting)
             {
@@ -183,7 +183,7 @@ namespace Foundation.Singletons
             this._isPersistent = true;
         }
 
-        private static void EnsurePlaySession()
+        private static void InvalidateInstanceCacheIfPlaySessionChanged()
         {
             if (!Application.isPlaying) return;
 
