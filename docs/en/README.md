@@ -76,11 +76,10 @@ This separation of responsibilities is maintained.
 
 ### How Play Session Detection Works
 
-Since `[RuntimeInitializeOnLoadMethod]` execution order is not guaranteed, this implementation uses `Time.realtimeSinceStartupAsDouble` to detect Play session boundaries.
-
-* `Time.realtimeSinceStartupAsDouble` resets to 0 when entering Play Mode
-* If the current value is less than the previously recorded value, a new Play session is detected
-* This approach enables robust design that does not depend on initialization method call order
+* A non-generic `SingletonRuntime.SubsystemRegistration` (`RuntimeInitializeLoadType.SubsystemRegistration`) runs before the first scene load and increments `PlaySessionId`
+* `Time.frameCount` guards against double-increment when the callback fires more than once in the same frame
+* `SingletonBehaviour<T>` reads `PlaySessionId` to invalidate its static cache per Play session
+* If initialization is delayed, `EnsureInitializedForCurrentPlaySession` re-hooks `Application.quitting` and lazily captures the main thread ID as a fallback
 
 ### DontDestroyOnLoad Call Management
 
@@ -95,7 +94,7 @@ this implementation uses the `_isPersistent` flag to limit the call to once, avo
 | `Object.DontDestroyOnLoad()`                                 | **Only works on root GameObjects (or components on root GameObjects)**                                  |
 | `Application.quitting`                                       | **Invoked when exiting Play Mode in Editor**. May not be detected during pause on Android               |
 | `RuntimeInitializeLoadType.SubsystemRegistration`            | **Called before the first scene is loaded** (execution order is undefined)                              |
-| `Time.realtimeSinceStartupAsDouble`                          | **Resets to 0 when entering Play Mode**. Used for Play session detection                                |
+| `Time.frameCount`                                            | **Resets to 0 when entering Play Mode**. Used to guard duplicate initialization                         |
 | `Application.isPlaying`                                      | **`true` in Play Mode, `false` in Edit Mode**                                                           |
 | Domain Reload disabled                                       | **Static field values / static event handlers persist across Play sessions**                            |
 | Scene Reload disabled                                        | **`OnEnable` / `OnDisable` / `OnDestroy` etc. are called as if newly loaded**                           |
@@ -345,8 +344,7 @@ Yes. In Edit Mode, only search is performed with no static cache updates or auto
 
 ### Q. Why does it work even though `RuntimeInitializeOnLoadMethod` execution order is undefined?
 
-By utilizing the property that `Time.realtimeSinceStartupAsDouble` resets when entering Play Mode,
-Play session boundaries are detected without depending on initialization method call order.
+A non-generic `SubsystemRegistration` runs before the first scene load and uses `Time.frameCount` to avoid double execution in the same frame. Additionally, `SingletonBehaviour<T>` calls `EnsureInitializedForCurrentPlaySession` as needed, re-hooking `Application.quitting` and capturing the main thread ID if initialization was delayed.
 
 ## References 📚
 
@@ -360,8 +358,8 @@ Play session boundaries are detected without depending on initialization method 
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeOnLoadMethodAttribute.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeOnLoadMethodAttribute.html)
 * RuntimeInitializeLoadType.SubsystemRegistration
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeLoadType.SubsystemRegistration.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeLoadType.SubsystemRegistration.html)
-* Time.realtimeSinceStartupAsDouble
-  [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-realtimeSinceStartupAsDouble.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-realtimeSinceStartupAsDouble.html)
+* Time.frameCount
+  [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-frameCount.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-frameCount.html)
 * Application.isPlaying
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-isPlaying.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-isPlaying.html)
 * Object.FindAnyObjectByType
