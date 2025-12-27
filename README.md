@@ -15,6 +15,22 @@ Designed to remain **robust even when Domain Reload is disabled** (Enter Play Mo
 ## Requirements / 動作環境
 - Unity 6.3 (6000.3.x) or later
 
+## Directory Structure / ディレクトリ構成
+
+```
+Singletons/
+├── PersistentSingletonBehaviour.cs   # Public API (persistent / 永続)
+├── SceneSingletonBehaviour.cs        # Public API (scene-scoped / シーンスコープ)
+├── Core/
+│   ├── SingletonBehaviour.cs         # Core implementation / コア実装
+│   ├── SingletonRuntime.cs           # Internal runtime / 内部ランタイム
+│   └── SingletonLogger.cs            # Conditional logger (stripped in release) / 条件付きロガー（リリースで除去）
+└── Policy/
+    ├── ISingletonPolicy.cs           # Policy interface / ポリシーIF
+    ├── PersistentPolicy.cs           # Persistent policy / 永続ポリシー
+    └── SceneScopedPolicy.cs          # Scene-scoped policy / シーンスコープポリシー
+```
+
 ## Provided Classes / 提供クラス
 
 | Class | Persistence | Auto-create | Use Case |
@@ -33,6 +49,7 @@ Designed to remain **robust even when Domain Reload is disabled** (Enter Play Mo
 - ✅ Edit Mode では検索のみ（static キャッシュに副作用なし）
 - ✅ 派生型を拒否する厳密型チェック／非アクティブが存在する場合の自動生成ブロック（DEV/EDITOR）
 - ✅ 公開 API は Play 中メインスレッドを強制
+- ✅ リリースビルドでは例外・ログがストリップされ `null` を返す設計
 
 ---
 
@@ -45,6 +62,7 @@ Designed to remain **robust even when Domain Reload is disabled** (Enter Play Mo
 - ✅ Edit Mode safe (search only, no side effects on static cache)
 - ✅ Rejects derived types; blocks auto-create when an inactive instance exists (DEV/EDITOR)
 - ✅ Public API requires main thread in Play Mode
+- ✅ Release builds: exceptions/logs stripped, returns `null` silently
 
 > For design details and constraints, see the language-specific READMEs.
 

@@ -39,6 +39,22 @@ Unity 6.3（6000.3 系）以降での利用を想定しています。
 - `Singletons/` フォルダをプロジェクトに追加します（例：`Assets/Plugins/Singletons/`）。
 - 名前空間はプロジェクト方針に合わせて調整してください。
 
+### ディレクトリ構成
+
+```
+Singletons/
+├── PersistentSingletonBehaviour.cs   # Public API（永続）
+├── SceneSingletonBehaviour.cs        # Public API（シーンスコープ）
+├── Core/
+│   ├── SingletonBehaviour.cs         # コア実装
+│   ├── SingletonRuntime.cs           # 内部ランタイム
+│   └── SingletonLogger.cs            # 条件付きロガー
+└── Policy/
+    ├── ISingletonPolicy.cs           # ポリシーインターフェース
+    ├── PersistentPolicy.cs           # 永続ポリシー
+    └── SceneScopedPolicy.cs          # シーンスコープポリシー
+```
+
 ### 名前空間のインポート
 ```csharp
 using Singletons;
@@ -48,7 +64,7 @@ using Singletons;
 
 ### 1) 永続シングルトン（PersistentSingletonBehaviour）
 
-シーンを跨いで生存し、未配置なら自動生成されます。
+シーンを跨いで生存し、シーンにインスタンスがなければ自動生成されます。
 
 ```csharp
 using Singletons;
@@ -88,7 +104,7 @@ public sealed class LevelController : SceneSingletonBehaviour<LevelController>
 }
 ```
 
-> ⚠️ **未配置で `Instance` を呼ぶと DEV/EDITOR では例外**、Player では `null` を返します。
+> ⚠️ **シーンに配置せずに `Instance` を呼ぶと、DEV/EDITOR では例外**が発生し、**Player では `null`** を返します。
 
 ### 3) `Instance` / `TryGetInstance` の使い分け
 
@@ -98,10 +114,10 @@ public sealed class LevelController : SceneSingletonBehaviour<LevelController>
 | 初期化処理 | `OnSingletonAwake()` に記述（Play ごとの再初期化） |
 | 破棄処理 | `OnSingletonDestroy()` に記述（破棄時のみ） |
 
-* ✅ **Instance**：その依存が「必ず必要」なとき（Persistent なら無ければ作ってでも動かす）
+* ✅ **Instance**：その依存が「必ず必要」なとき（Persistent ならインスタンスがなければ自動生成してでも動かす）
   例：`GameManager`, `AudioManager` などゲーム進行に必須のマネージャ
 
-* ✅ **TryGetInstance**：「あるなら使う」「無いなら何もしない」「終了処理で増やしたくない」
+* ✅ **TryGetInstance**：「あれば使う」「なければ何もしない」「終了処理で新規生成したくない」
   例：`OnDisable` / `OnDestroy` / `OnApplicationPause` などの後片付け、任意機能の登録解除
 
 ```csharp
@@ -149,12 +165,13 @@ public sealed class ScoreHUD : MonoBehaviour
 
 | 状態 | Persistent | Scene |
 | --- | --- | --- |
-| インスタンス存在 | キャッシュ済みインスタンス | キャッシュ済みインスタンス |
-| 未存在 | 検索 → 無ければ**自動生成** | 検索 → 無ければ **例外(DEV/EDITOR)** or `null`(Player) |
+| インスタンスあり | キャッシュ済みインスタンス | キャッシュ済みインスタンス |
+| インスタンスなし | 検索 → 見つからなければ**自動生成** | 検索 → 見つからなければ **例外(DEV/EDITOR)** or `null`(Player) |
 | quitting 中 | `null` | `null` |
 | Edit Mode | 検索のみ（生成・キャッシュなし） | 検索のみ（生成・キャッシュなし） |
-| 非アクティブが存在（DEV/EDITOR） | 例外（重複を防止） | 例外（重複を防止） |
+| 非アクティブなインスタンスが存在（DEV/EDITOR） | 例外（隠れ重複を防止） | 例外（隠れ重複を防止） |
 | 派生型が見つかった | `null`（Play: 破棄、Edit: ログのみ） | `null`（Play: 破棄、Edit: ログのみ） |
+| 非アクティブ/無効インスタンス検出 | 例外(DEV/EDITOR) or `null`(Player) | 例外(DEV/EDITOR) or `null`(Player) |
 
 ### `static bool TryGetInstance(out T instance)`
 
@@ -162,8 +179,8 @@ public sealed class ScoreHUD : MonoBehaviour
 
 | 状態 | 戻り値 | `instance` |
 | --- | --- | --- |
-| インスタンス存在 | `true` | 有効な参照 |
-| 未存在 | `false` | `null` |
+| インスタンスあり | `true` | 有効な参照 |
+| インスタンスなし | `false` | `null` |
 | quitting 中 | `false` | `null` |
 | Edit Mode | 検索結果 | 検索のみ（キャッシュなし） |
 | 派生型が見つかった | `false` | `null`（Play: 破棄、Edit: ログのみ） |
@@ -202,6 +219,21 @@ Domain Reload を無効化すると、**static フィールドや static イベ�
 
 `DontDestroyOnLoad` は同一オブジェクトに複数回呼んでも問題ありませんが、
 本実装では `_isPersistent` フラグで呼び出しを1回に制限し、不要な処理を回避しています。
+
+### なぜ `SingletonLogger` を使うのか？
+
+`[Conditional]` 属性により、**リリースビルドでは呼び出しサイト自体がコンパイル時に除去**されます。
+これにより：
+
+* DEV/EDITOR：例外スロー・警告ログで早期にバグを検出
+* リリースビルド：例外もログも発生せず、`null` を返して処理継続（パフォーマンス優先）
+
+```csharp
+// リリースビルドでは、この呼び出し自体が削除される
+SingletonLogger.ThrowInvalidOperation("...");
+// ↑ 呼び出しが削除されるため、後続の return null; に到達
+return null;
+```
 
 ## Constraints（重要な制約）⚠️
 
@@ -360,10 +392,16 @@ CRTP 制約によりコンパイルエラー（CS0311）になります。型パ
 安全です。Edit Mode では検索のみ行い、static キャッシュの更新や自動生成は行いません。
 派生型が見つかった場合も破棄せずログ出力のみで、Undo システムや Inspector に影響を与えません。
 
-### Q. SceneSingletonBehaviour で未配置だとどうなる？
+### Q. SceneSingletonBehaviour をシーンに配置していないとどうなる？
 
 DEV/EDITOR では `InvalidOperationException` が発生します。Player では `null` を返します。
 シーンに必ず配置してください。
+
+### Q. リリースビルドで例外が発生しないのはなぜ？
+
+`SingletonLogger.ThrowInvalidOperation` は `[Conditional]` 属性で修飾されており、
+リリースビルドでは**呼び出しサイト自体がコンパイル時に除去**されます。
+そのため、例外はスローされず処理が継続し、`null` が返されます。
 
 ## References 📚
 

@@ -39,6 +39,22 @@ Common features:
 - Add the `Singletons/` folder to your project (e.g., `Assets/Plugins/Singletons/`).
 - Adjust the namespace according to your project conventions.
 
+### Directory Structure
+
+```
+Singletons/
+├── PersistentSingletonBehaviour.cs   # Public API (persistent)
+├── SceneSingletonBehaviour.cs        # Public API (scene-scoped)
+├── Core/
+│   ├── SingletonBehaviour.cs         # Core implementation
+│   ├── SingletonRuntime.cs           # Internal runtime
+│   └── SingletonLogger.cs            # Conditional logger
+└── Policy/
+    ├── ISingletonPolicy.cs           # Policy interface
+    ├── PersistentPolicy.cs           # Persistent policy
+    └── SceneScopedPolicy.cs          # Scene-scoped policy
+```
+
 ### Namespace Import
 ```csharp
 using Singletons;
@@ -155,6 +171,7 @@ Returns the singleton instance.
 | Edit Mode | Search only (no create, no cache) | Search only (no create, no cache) |
 | Inactive exists (DEV/EDITOR) | Throws to avoid hidden duplicate | Throws to avoid hidden duplicate |
 | Derived type found | `null` (Play: destroy, Edit: log only) | `null` (Play: destroy, Edit: log only) |
+| Inactive/disabled instance found | Throw (DEV/EDITOR) or `null` (Player) | Throw (DEV/EDITOR) or `null` (Player) |
 
 ### `static bool TryGetInstance(out T instance)`
 
@@ -202,6 +219,21 @@ This separation of responsibilities is maintained.
 
 While calling `DontDestroyOnLoad` multiple times on the same object is harmless,
 this implementation uses the `_isPersistent` flag to limit the call to once, avoiding unnecessary processing.
+
+### Why `SingletonLogger`?
+
+The `[Conditional]` attribute **removes call sites at compile time** in release builds.
+This means:
+
+* DEV/EDITOR: Exceptions and warnings enable fail-fast debugging
+* Release builds: No exceptions, no logs—returns `null` and continues (performance priority)
+
+```csharp
+// In release builds, this call is stripped entirely
+SingletonLogger.ThrowInvalidOperation("...");
+// ↑ Call removed, execution continues to return null below
+return null;
+```
 
 ## Constraints ⚠️
 
@@ -364,6 +396,11 @@ If a derived type is found, it is logged only and not destroyed, avoiding Undo s
 
 In DEV/EDITOR, an `InvalidOperationException` is thrown. In Player, `null` is returned.
 Always place the singleton in the scene.
+
+### Q. Why don't exceptions occur in release builds?
+
+`SingletonLogger.ThrowInvalidOperation` uses the `[Conditional]` attribute, which **removes call sites at compile time** in release builds.
+As a result, no exception is thrown and execution continues, returning `null`.
 
 ## References 📚
 
