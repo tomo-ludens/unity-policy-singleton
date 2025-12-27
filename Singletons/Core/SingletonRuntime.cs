@@ -1,31 +1,23 @@
 using System.Threading;
 using UnityEngine;
 
-namespace Foundation.Singletons
+namespace Singletons.Core
 {
     /// <summary>
     /// Manages Play session state for singleton infrastructure.
     /// </summary>
-    public static class SingletonRuntime
+    internal static class SingletonRuntime
     {
         private static int _lastBeginFrame = -1;
         private static int _mainThreadId = -1;
 
-        /// <summary>
-        /// Increments once per Play session. Used to invalidate singleton caches.
-        /// </summary>
         public static int PlaySessionId { get; private set; }
-
-        /// <summary>
-        /// True while the application is quitting (or Play Mode is exiting in Editor).
-        /// </summary>
         public static bool IsQuitting { get; private set; }
 
         internal static void EnsureInitializedForCurrentPlaySession()
         {
             if (!Application.isPlaying) return;
 
-            // Unsubscribe first: Domain Reload disabled keeps subscribers across Play sessions.
             Application.quitting -= OnQuitting;
             Application.quitting += OnQuitting;
 
@@ -51,8 +43,7 @@ namespace Foundation.Singletons
                 {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     Debug.LogError(
-                        message: $"[SingletonRuntime] {callerContext} must be called from the main thread, " +
-                                 "but the main thread ID is not initialized yet. " +
+                        message: $"[SingletonRuntime] {callerContext} must be called from the main thread, but the main thread ID is not initialized yet.\n" +
                                  $"Current thread: {Thread.CurrentThread.ManagedThreadId}."
                     );
 #endif
@@ -64,7 +55,7 @@ namespace Foundation.Singletons
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.LogError(
-                message: $"[SingletonRuntime] {callerContext} must be called from the main thread. " +
+                message: $"[SingletonRuntime] {callerContext} must be called from the main thread.\n" +
                          $"Current thread: {Thread.CurrentThread.ManagedThreadId}, Main thread: {_mainThreadId}."
             );
 #endif
@@ -82,7 +73,6 @@ namespace Foundation.Singletons
 
         private static void BeginNewPlaySession()
         {
-            // Dedupe: SubsystemRegistration can be called multiple times in same frame.
             if (Time.frameCount == _lastBeginFrame) return;
 
             _lastBeginFrame = Time.frameCount;
@@ -109,14 +99,13 @@ namespace Foundation.Singletons
             if (_mainThreadId != -1) return true;
             if (!Application.isPlaying) return false;
 
-            // SynchronizationContext exists only on Unity's main thread.
             if (SynchronizationContext.Current == null) return false;
 
             _mainThreadId = Thread.CurrentThread.ManagedThreadId;
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.LogWarning(
-                message: $"[SingletonRuntime] Main thread ID lazily captured as {_mainThreadId}. " +
+                message: $"[SingletonRuntime] Main thread ID lazily captured as {_mainThreadId}.\n" +
                          $"Context: '{callerContext}'."
             );
 #endif
@@ -130,7 +119,7 @@ namespace Foundation.Singletons
         {
             if (_editorHooksInstalled) return;
 
-            _editorHooksInstalled = true;
+           _editorHooksInstalled = true;
 
             UnityEditor.EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             UnityEditor.EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
