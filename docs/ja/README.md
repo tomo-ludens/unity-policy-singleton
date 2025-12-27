@@ -76,11 +76,10 @@ Domain Reload を無効化すると、**static フィールドや static イベ�
 
 ### Play セッション検出の仕組み
 
-`[RuntimeInitializeOnLoadMethod]` の実行順は保証されないため、本実装では `Time.realtimeSinceStartupAsDouble` を利用して Play セッションの境界を検出します。
-
-* `Time.realtimeSinceStartupAsDouble` は Play Mode 開始時に 0 にリセットされる
-* 前回記録した値より小さい場合、新しい Play セッションと判定
-* この方式により、初期化メソッドの呼び出し順に依存しない堅牢な設計を実現
+* 非ジェネリックな `SingletonRuntime.SubsystemRegistration`（`RuntimeInitializeLoadType.SubsystemRegistration`）が Play 開始前に必ず呼ばれる前提で、ここで `PlaySessionId` をインクリメント
+* 同一フレーム内で二重に呼ばれた場合も `Time.frameCount` でガードして一度だけカウント
+* `SingletonBehaviour<T>` 側は `PlaySessionId` を参照し、Play ごとに static キャッシュを無効化
+* 初期化順が遅延した場合でも、`EnsureInitializedForCurrentPlaySession` がフォールバックしてフックを張り直し、メインスレッド ID を捕捉
 
 ### DontDestroyOnLoad の呼び出し管理
 
@@ -95,7 +94,7 @@ Domain Reload を無効化すると、**static フィールドや static イベ�
 | `Object.DontDestroyOnLoad()`                                 | **root GameObject（または root 上の Component）でのみ有効**                    |
 | `Application.quitting`                                       | **Editor の Play Mode 終了時にも発火**。Android では pause 中に検出されない場合がある      |
 | `RuntimeInitializeLoadType.SubsystemRegistration`            | **最初のシーンロード前**に呼ばれる（ただし実行順は不定）                                     |
-| `Time.realtimeSinceStartupAsDouble`                          | **Play Mode 開始時に 0 にリセット**。Play セッション検出に利用                         |
+| `Time.frameCount`                                            | **Play Mode 開始時に 0 にリセット**。二重初期化ガードに利用                         |
 | `Application.isPlaying`                                      | **Play Mode では `true`、Edit Mode では `false`**                       |
 | Domain Reload 無効                                             | **static フィールド値 / static イベントハンドラが Play 間で残留**                     |
 | Scene Reload 無効                                              | **`OnEnable` / `OnDisable` / `OnDestroy` 等は "新規ロード同様に呼ばれる"**       |
@@ -345,8 +344,7 @@ CRTP 制約によりコンパイルエラー（CS0311）になります。型パ
 
 ### Q. `RuntimeInitializeOnLoadMethod` の実行順が不定なのに、なぜ動く？
 
-`Time.realtimeSinceStartupAsDouble` が Play Mode 開始時にリセットされる性質を利用して、
-初期化メソッドの呼び出し順に依存せず Play セッションの境界を検出しています。
+非ジェネリックの `SubsystemRegistration` が Play 開始前に走り、`Time.frameCount` で同一フレームの二重実行を抑止しています。加えて、`SingletonBehaviour<T>` 側で `EnsureInitializedForCurrentPlaySession` を都度呼び、初期化が遅れた場合でもフックを再設定するフォールバックを持っています。
 
 ## References 📚
 
@@ -360,8 +358,8 @@ CRTP 制約によりコンパイルエラー（CS0311）になります。型パ
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeOnLoadMethodAttribute.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeOnLoadMethodAttribute.html)
 * RuntimeInitializeLoadType.SubsystemRegistration
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeLoadType.SubsystemRegistration.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RuntimeInitializeLoadType.SubsystemRegistration.html)
-* Time.realtimeSinceStartupAsDouble
-  [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-realtimeSinceStartupAsDouble.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-realtimeSinceStartupAsDouble.html)
+* Time.frameCount
+  [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-frameCount.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Time-frameCount.html)
 * Application.isPlaying
   [https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-isPlaying.html](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-isPlaying.html)
 * Object.FindAnyObjectByType

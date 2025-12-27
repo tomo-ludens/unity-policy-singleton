@@ -5,6 +5,9 @@ namespace Foundation.Singletons
     /// <summary>
     /// Type-per-singleton base class for MonoBehaviour with soft reset per Play session.
     /// </summary>
+    /// <remarks>
+    /// All public API (Instance, TryGetInstance) must be called from the main thread.
+    /// </remarks>
     public abstract class SingletonBehaviour<T> : MonoBehaviour where T : SingletonBehaviour<T>
     {
         private const int UninitializedPlaySessionId = -1;
@@ -21,8 +24,9 @@ namespace Foundation.Singletons
 
         /// <summary>
         /// Returns the singleton instance. Auto-creates if missing (Play Mode only).
-        /// Returns null while quitting.
+        /// Returns null while quitting or if called from a background thread.
         /// </summary>
+        /// <remarks>Must be called from main thread.</remarks>
         public static T Instance
         {
             get
@@ -30,6 +34,11 @@ namespace Foundation.Singletons
                 if (!Application.isPlaying)
                 {
                     return Object.FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
+                }
+
+                if (!SingletonRuntime.AssertMainThread(callerContext: $"{typeof(T).Name}.Instance"))
+                {
+                    return null;
                 }
 
                 InvalidateInstanceCacheIfPlaySessionChanged();
@@ -40,22 +49,39 @@ namespace Foundation.Singletons
                 _instance = Object.FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
                 if (_instance != null) return _instance;
 
-                var go = new GameObject(name: typeof(T).Name);
-                _instance = go.AddComponent<T>();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                var any = Object.FindAnyObjectByType<T>(findObjectsInactive: FindObjectsInactive.Include);
+                if (any != null && !any.isActiveAndEnabled)
+                {
+                    Debug.LogWarning(
+                        message: $"[{typeof(T).Name}] No ACTIVE instance found, but an INACTIVE instance exists ('{any.name}'). " +
+                                 "Policy is Exclude, so a NEW instance will be auto-created (risk: later duplicate destruction).",
+                        context: any
+                    );
+                }
+#endif
+                _instance = CreateInstance();
                 return _instance;
             }
         }
 
         /// <summary>
         /// Gets the singleton instance without creating one.
-        /// Returns false while quitting or when no instance exists.
+        /// Returns false while quitting, when no instance exists, or if called from a background thread.
         /// </summary>
+        /// <remarks>Must be called from main thread.</remarks>
         public static bool TryGetInstance(out T instance)
         {
             if (!Application.isPlaying)
             {
                 instance = Object.FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
                 return instance != null;
+            }
+
+            if (!SingletonRuntime.AssertMainThread(callerContext: $"{typeof(T).Name}.TryGetInstance"))
+            {
+                instance = null;
+                return false;
             }
 
             InvalidateInstanceCacheIfPlaySessionChanged();
@@ -77,21 +103,21 @@ namespace Foundation.Singletons
             return instance != null;
         }
 
-        private void Awake()
+        protected void Awake()
         {
             if (!Application.isPlaying) return;
 
             this.InitializeForCurrentPlaySessionIfNeeded();
         }
 
-        private void OnEnable()
+        protected void OnEnable()
         {
             if (!Application.isPlaying) return;
 
             this.InitializeForCurrentPlaySessionIfNeeded();
         }
 
-        private void OnDestroy()
+        protected void OnDestroy()
         {
             if (!ReferenceEquals(objA: _instance, objB: this)) return;
 
@@ -111,6 +137,36 @@ namespace Foundation.Singletons
         /// </summary>
         protected virtual void OnSingletonDestroy()
         {
+        }
+
+        private static T CreateInstance()
+        {
+            var go = new GameObject(name: typeof(T).Name);
+            DontDestroyOnLoad(target: go);
+
+            var instance = go.AddComponent<T>();
+            instance._isPersistent = true;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogWarning(
+                message: $"[{typeof(T).Name}] Auto-created (no active instance found; inactive objects excluded).",
+                context: instance
+            );
+#endif
+            return instance;
+        }
+
+        private static void InvalidateInstanceCacheIfPlaySessionChanged()
+        {
+            if (!Application.isPlaying) return;
+
+            SingletonRuntime.EnsureInitializedForCurrentPlaySession();
+
+            var current = SingletonRuntime.PlaySessionId;
+            if (_cachedPlaySessionId == current) return;
+
+            _cachedPlaySessionId = current;
+            _instance = null;
         }
 
         private void InitializeForCurrentPlaySessionIfNeeded()
@@ -140,18 +196,34 @@ namespace Foundation.Singletons
             {
                 if (ReferenceEquals(objA: _instance, objB: this)) return true;
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning(
+                    message: $"[{typeof(T).Name}] Duplicate detected. Existing='{_instance.name}', destroying '{this.name}'.",
+                    context: this
+                );
+#endif
                 Destroy(obj: this.gameObject);
                 return false;
             }
 
-            // CRTP constraint covers most cases, but intermediate base classes can bypass it.
+            if (this.GetType() != typeof(T))
+            {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogError(
+                    message: $"[{typeof(T).Name}] Type mismatch detected. Expected='{typeof(T).Name}', Actual='{this.GetType().Name}', destroying '{this.name}'.",
+                    context: this
+                );
+#endif
+                Destroy(obj: this.gameObject);
+                return false;
+            }
+
             var typedThis = this as T;
             if (typedThis == null)
             {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogError(
-                    message: $"[{this.GetType().Name}] must inherit SingletonBehaviour<{this.GetType().Name}>, " +
-                             $"not SingletonBehaviour<{typeof(T).Name}>.",
+                    message: $"[{typeof(T).Name}] Internal cast failure. Expected='{typeof(T).Name}', destroying '{this.name}'.",
                     context: this
                 );
 #endif
@@ -165,35 +237,23 @@ namespace Foundation.Singletons
 
         private void EnsurePersistent()
         {
+            // Already persistent (e.g., auto-created instance).
+            if (this._isPersistent) return;
+
             // DontDestroyOnLoad requires root.
             if (this.transform.parent != null)
             {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning(
-                    message: $"[{typeof(T).Name}] Reparented to root for DontDestroyOnLoad.",
+                    message: $"[{typeof(T).Name}] Reparented to root for DontDestroyOnLoad (was under '{this.transform.parent.name}').",
                     context: this
                 );
 #endif
                 this.transform.SetParent(parent: null, worldPositionStays: true);
             }
 
-            if (this._isPersistent) return;
-
             DontDestroyOnLoad(target: this.gameObject);
             this._isPersistent = true;
-        }
-
-        private static void InvalidateInstanceCacheIfPlaySessionChanged()
-        {
-            if (!Application.isPlaying) return;
-
-            SingletonRuntime.EnsureInitializedForCurrentPlaySession();
-
-            var current = SingletonRuntime.PlaySessionId;
-            if (_cachedPlaySessionId == current) return;
-
-            _cachedPlaySessionId = current;
-            _instance = null;
         }
     }
 }
