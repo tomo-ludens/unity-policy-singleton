@@ -48,6 +48,7 @@ They share the same core logic, while a **policy** controls the lifecycle behavi
 
 ```text
 Singletons/
+├── Singletons.asmdef                 # Assembly Definition
 ├── PersistentSingletonBehaviour.cs   # Public API (persistent + auto-create)
 ├── SceneSingletonBehaviour.cs        # Public API (scene-scoped + no auto-create)
 ├── Core/
@@ -58,7 +59,7 @@ Singletons/
     ├── ISingletonPolicy.cs           # Policy interface
     ├── PersistentPolicy.cs           # Persistent policy implementation
     └── SceneScopedPolicy.cs          # Scene-scoped policy implementation
-````
+```
 
 ## Dependencies (Assumed Unity API Behavior)
 

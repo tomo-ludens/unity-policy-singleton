@@ -48,6 +48,7 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 
 ```text
 Singletons/
+├── Singletons.asmdef                 # Assembly Definition
 ├── PersistentSingletonBehaviour.cs   # Public API (永続・自動生成あり)
 ├── SceneSingletonBehaviour.cs        # Public API (シーン限定・自動生成なし)
 ├── Core/
@@ -58,7 +59,7 @@ Singletons/
     ├── ISingletonPolicy.cs           # ポリシーIF
     ├── PersistentPolicy.cs           # 永続ポリシーの実装
     └── SceneScopedPolicy.cs          # シーンスコープポリシーの実装
-````
+```
 
 ## Dependencies / 前提としている Unity API の挙動
 
