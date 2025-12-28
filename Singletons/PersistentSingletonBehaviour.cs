@@ -20,7 +20,8 @@ namespace Singletons
     /// }
     /// </code>
     /// </example>
-    public abstract class PersistentSingletonBehaviour<T>: SingletonBehaviour<T, PersistentPolicy> where T : PersistentSingletonBehaviour<T>
+    public abstract class PersistentSingletonBehaviour<T> : SingletonBehaviour<T, PersistentPolicy>
+        where T : PersistentSingletonBehaviour<T>
     {
     }
 }

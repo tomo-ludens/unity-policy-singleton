@@ -13,7 +13,9 @@ namespace Singletons.Core
     /// <para><b>Constraints:</b> Component must stay active+enabled. Main-thread only.</para>
     /// </remarks>
     [DisallowMultipleComponent]
-    public abstract class SingletonBehaviour<T, TPolicy> : MonoBehaviour where T : SingletonBehaviour<T, TPolicy> where TPolicy : struct, ISingletonPolicy
+    public abstract class SingletonBehaviour<T, TPolicy> : MonoBehaviour
+        where T : SingletonBehaviour<T, TPolicy>
+        where TPolicy : struct, ISingletonPolicy
     {
         private const int UninitializedPlaySessionId = -1;
         private const FindObjectsInactive FindInactivePolicy = FindObjectsInactive.Exclude;
@@ -238,7 +240,10 @@ namespace Singletons.Core
             {
                 if (!instance.isActiveAndEnabled)
                 {
-                    SingletonLogger.ThrowInvalidOperation(message: $"Auto-create BLOCKED: inactive instance exists ('{instance.name}', type: '{instance.GetType().Name}').\nEnable it or remove from scene.", typeTag: LogCategoryName);
+                    SingletonLogger.ThrowInvalidOperation(
+                        message: $"Auto-create BLOCKED: inactive instance exists ('{instance.name}', type: '{instance.GetType().Name}').\nEnable it or remove from scene.",
+                        typeTag: LogCategoryName
+                    );
                 }
             }
         }

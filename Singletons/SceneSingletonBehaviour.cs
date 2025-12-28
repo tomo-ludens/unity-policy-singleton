@@ -23,7 +23,8 @@ namespace Singletons
     /// if (LevelManager.TryGetInstance(out var mgr)) { mgr.DoSomething(); }
     /// </code>
     /// </example>
-    public abstract class SceneSingletonBehaviour<T> : SingletonBehaviour<T, SceneScopedPolicy> where T : SceneSingletonBehaviour<T>
+    public abstract class SceneSingletonBehaviour<T> : SingletonBehaviour<T, SceneScopedPolicy>
+        where T : SceneSingletonBehaviour<T>
     {
     }
 }
