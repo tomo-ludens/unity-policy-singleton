@@ -199,6 +199,11 @@ namespace Singletons.Core
             _instance = null;
         }
 
+        /// <summary>
+        /// Override for per-session reinitialization when Domain Reload is disabled.
+        /// </summary>
+        protected virtual void OnPlaySessionStart() { }
+
         private static T CreateInstance()
         {
             var go = new GameObject(name: typeof(T).Name);
@@ -225,7 +230,7 @@ namespace Singletons.Core
 
             if (Application.isPlaying)
             {
-                Object.Destroy(obj: candidate.gameObject);
+                Destroy(obj: candidate.gameObject);
             }
 
             return null;
@@ -267,7 +272,7 @@ namespace Singletons.Core
 
             if (SingletonRuntime.IsQuitting)
             {
-                Object.Destroy(obj: this.gameObject);
+                Destroy(obj: this.gameObject);
                 return;
             }
 
@@ -278,6 +283,7 @@ namespace Singletons.Core
 
             this.EnsurePersistent();
             this._initializedPlaySessionId = currentPlaySessionId;
+            this.OnPlaySessionStart();
         }
 
         private bool TryEstablishAsInstance()
@@ -287,14 +293,14 @@ namespace Singletons.Core
                 if (ReferenceEquals(objA: _instance, objB: this)) return true;
 
                 SingletonLogger.LogWarning(message: $"Duplicate detected. Existing='{_instance.name}', destroying '{this.name}'.", typeTag: LogCategoryName, context: this);
-                Object.Destroy(obj: this.gameObject);
+                Destroy(obj: this.gameObject);
                 return false;
             }
 
             if (this.GetType() != typeof(T))
             {
                 SingletonLogger.LogError(message: $"Type mismatch. Expected='{typeof(T).Name}', Actual='{this.GetType().Name}', destroying '{this.name}'.", typeTag: LogCategoryName, context: this);
-                Object.Destroy(obj: this.gameObject);
+                Destroy(obj: this.gameObject);
                 return false;
             }
 

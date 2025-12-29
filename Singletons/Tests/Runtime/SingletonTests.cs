@@ -5,8 +5,6 @@ using UnityEngine.TestTools;
 
 namespace Singletons.Tests.Runtime
 {
-    #region Test Singleton Classes
-
     public sealed class TestPersistentSingleton : GlobalSingleton<TestPersistentSingleton>
     {
         public int AwakeCount { get; private set; }
@@ -44,7 +42,25 @@ namespace Singletons.Tests.Runtime
     {
     }
 
-    #endregion
+    public sealed class TestSoftResetSingleton : GlobalSingleton<TestSoftResetSingleton>
+    {
+        private int _awakeCalls;
+        private int _playSessionStartCalls;
+
+        public int AwakeCalls => _awakeCalls;
+        public int PlaySessionStartCalls => _playSessionStartCalls;
+
+        protected override void Awake()
+        {
+            base.Awake();
+            _awakeCalls++;
+        }
+
+        protected override void OnPlaySessionStart()
+        {
+            _playSessionStartCalls++;
+        }
+    }
 
     [TestFixture]
     public class PersistentSingletonTests
@@ -143,6 +159,46 @@ namespace Singletons.Tests.Runtime
                 condition: instance.gameObject.scene.name == "DontDestroyOnLoad" || instance.gameObject.scene.buildIndex == -1,
                 message: "Persistent singleton should be in DontDestroyOnLoad scene"
                 );
+        }
+    }
+
+    public class SoftResetTests
+    {
+        [TearDown]
+        public void TearDown()
+        {
+            if (TestSoftResetSingleton.TryGetInstance(instance: out var instance))
+            {
+                Object.DestroyImmediate(obj: instance.gameObject);
+            }
+
+            default(TestSoftResetSingleton).ResetStaticCacheForTesting();
+        }
+
+        [UnityTest]
+        public IEnumerator Reinitializes_PerPlaySession_WhenPlaySessionIdChanges()
+        {
+            var instance = TestSoftResetSingleton.Instance;
+            yield return null;
+
+            Assert.IsNotNull(anObject: instance);
+            Assert.AreEqual(expected: 1, actual: instance.AwakeCalls, message: "Awake should run once per GameObject lifetime");
+            Assert.AreEqual(expected: 1, actual: instance.PlaySessionStartCalls, message: "OnPlaySessionStart should run on first establishment");
+
+            // Simulate new Play session boundary (Domain Reload disabled scenario)
+            TestExtensions.AdvancePlaySessionIdForTesting();
+
+            var sameInstance = TestSoftResetSingleton.Instance;
+            yield return null;
+
+            Assert.AreSame(expected: instance, actual: sameInstance, message: "Instance should be re-used (not recreated) across play session boundary");
+            Assert.AreEqual(expected: 1, actual: sameInstance.AwakeCalls, message: "Awake should not be re-run on play session boundary");
+            Assert.AreEqual(expected: 2, actual: sameInstance.PlaySessionStartCalls, message: "OnPlaySessionStart should run once per Play session");
+            Assert.AreEqual(
+                expected: 1,
+                actual: Object.FindObjectsByType<TestSoftResetSingleton>(sortMode: FindObjectsSortMode.None).Length,
+                message: "Only one instance should exist"
+            );
         }
     }
 

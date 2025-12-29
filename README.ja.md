@@ -287,7 +287,9 @@ protected override void Awake()
 
 Domain Reload 無効環境では static 状態が残ります。本実装は Play セッション境界（`PlaySessionId`）でキャッシュを無効化し、Play ごとに再初期化を実行します。
 
-`Awake()` での初期化は **再実行に耐える（冪等）** 書き方にしてください（例：イベント購読は「解除 → 登録」で行います）。
+Unity の `Awake()` は GameObject の生存期間中に1回しか呼ばれないため、**Playごとの再初期化**は `OnPlaySessionStart()`（シングルトンが当該Playセッションで確立された直後に、Playセッションごとに1回呼ばれる）をオーバーライドして行ってください。
+
+`OnPlaySessionStart()` の初期化は **再実行に耐える（冪等）** 書き方にしてください（例：イベント購読は「解除 → 登録」で行います）。
 
 ### Threading / Main Thread
 
@@ -335,9 +337,9 @@ Edit Mode（`Application.isPlaying == false`）では、次の挙動に固定し
 
 ### 同梱テスト
 
-本パッケージには包括的な PlayMode および EditMode テストが含まれ、**52個の総テスト**（PlayMode 40個 + EditMode 12個）すべて成功しています。
+本パッケージには包括的な PlayMode および EditMode テストが含まれ、**53個の総テスト**（PlayMode 41個 + EditMode 12個）すべて成功しています。
 
-#### PlayMode テスト（40個）
+#### PlayMode テスト（41個）
 
 | カテゴリ | テスト数 | カバレッジ |
 |---------|---------|----------|
@@ -347,6 +349,7 @@ Edit Mode（`Application.isPlaying == false`）では、次の挙動に固定し
 | TypeMismatch | 2 | 派生クラス拒否 |
 | ThreadSafety | 7 | バックグラウンドスレッド保護、メインロード検証 |
 | Lifecycle | 2 | 破棄、再生成 |
+| SoftReset | 1 | PlaySessionId 境界での Playごとの再初期化 |
 | SceneSingletonEdgeCase | 2 | 未配置、自動生成なし |
 | PracticalUsage | 6 | GameManager、LevelController、状態管理 |
 | PolicyBehavior | 3 | ポリシー駆動挙動検証 |

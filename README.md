@@ -287,7 +287,9 @@ Even if you forget, there is a safety net that initializes on the first `Instanc
 
 With Domain Reload disabled, static state can persist. This library invalidates caches at the Play-session boundary (`PlaySessionId`) and reinitializes every Play session to reset state.
 
-Write your `Awake()` initialization to be **idempotent** (e.g., "unsubscribe → subscribe" for event hookups).
+Because Unity calls `Awake()` only once per GameObject lifetime, do **per-Play reinitialization** by overriding `OnPlaySessionStart()` (called once per Play session when the singleton is established).
+
+Write your `OnPlaySessionStart()` logic to be **idempotent** (e.g., "unsubscribe → subscribe" for event hookups).
 
 ### Threading / Main Thread
 
@@ -335,9 +337,9 @@ This is **intended behavior** for this singleton design, so align your team on o
 
 ### Included Tests
 
-This package includes comprehensive PlayMode and EditMode tests with **52 total tests** (40 PlayMode + 12 EditMode), all passing.
+This package includes comprehensive PlayMode and EditMode tests with **53 total tests** (41 PlayMode + 12 EditMode), all passing.
 
-#### PlayMode Tests (40 tests)
+#### PlayMode Tests (41 tests)
 
 | Category | Tests | Coverage |
 |----------|-------|----------|
@@ -347,6 +349,7 @@ This package includes comprehensive PlayMode and EditMode tests with **52 total 
 | TypeMismatch | 2 | Derived class rejection |
 | ThreadSafety | 7 | Background thread protection, main thread validation |
 | Lifecycle | 2 | Destruction, recreation |
+| SoftReset | 1 | Per-Play reinitialization on PlaySessionId boundary |
 | SceneSingletonEdgeCase | 2 | Not placed, no auto-create |
 | PracticalUsage | 6 | GameManager, LevelController, state management |
 | PolicyBehavior | 3 | Policy-driven behavior validation |

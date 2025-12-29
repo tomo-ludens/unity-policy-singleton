@@ -35,8 +35,25 @@ namespace Singletons.Tests
         {
             // Use reflection to access private static field
             var type = typeof(SingletonRuntime);
-            var field = type.GetField(name: "IsQuitting", bindingAttr: System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            var field = type.GetField(name: "<IsQuitting>k__BackingField", bindingAttr: System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
             field?.SetValue(obj: null, value: false);
+        }
+
+        /// <summary>
+        /// Test-only: Advances PlaySessionId to simulate a new Play session boundary.
+        /// </summary>
+        public static void AdvancePlaySessionIdForTesting()
+        {
+            // PlaySessionId is an auto-property: backing field is &lt;PlaySessionId&gt;k__BackingField
+            var type = typeof(SingletonRuntime);
+            var field = type.GetField(name: "<PlaySessionId>k__BackingField", bindingAttr: System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            if (field == null) return;
+
+            int current = (int)field.GetValue(obj: null);
+            unchecked
+            {
+                field.SetValue(obj: null, value: current + 1);
+            }
         }
     }
 }
