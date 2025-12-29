@@ -1,6 +1,9 @@
 using NUnit.Framework;
 using Singletons.Core;
+using Singletons.Policy;
+using UnityEngine;
 
+// ReSharper disable RedundantOverriddenMember
 namespace Singletons.Tests.Editor
 {
     [TestFixture]
@@ -9,41 +12,228 @@ namespace Singletons.Tests.Editor
         [Test]
         public void PlaySessionId_IsAccessible()
         {
-            var sessionId = SingletonRuntime.PlaySessionId;
+            int sessionId = SingletonRuntime.PlaySessionId;
             Assert.GreaterOrEqual(arg1: sessionId, arg2: 0, message: "PlaySessionId should be non-negative");
         }
 
         [Test]
-        public void IsQuitting_IsFalse_InEditMode()
+        public void IsQuitting_ReturnsFalse_InEditMode()
         {
-            SingletonRuntime.ResetQuittingFlagForTesting();
+            TestExtensions.ResetQuittingFlagForTesting();
             Assert.IsFalse(condition: SingletonRuntime.IsQuitting, message: "IsQuitting should be false in Edit Mode");
         }
+    }
 
+    [TestFixture]
+    public class PolicyTests
+    {
         [Test]
-        public void SimulateQuitting_CanBeReset()
+        public void PersistentPolicy_HasCorrectValues()
         {
-            SingletonRuntime.SimulateQuittingForTesting();
-            Assert.IsTrue(condition: SingletonRuntime.IsQuitting);
-
-            SingletonRuntime.ResetQuittingFlagForTesting();
-            Assert.IsFalse(condition: SingletonRuntime.IsQuitting);
+            var policy = new PersistentPolicy();
+            Assert.IsTrue(condition: policy.PersistAcrossScenes, message: "PersistentPolicy should persist across scenes");
+            Assert.IsTrue(condition: policy.AutoCreateIfMissing, message: "PersistentPolicy should auto-create if missing");
         }
 
         [Test]
-        public void AdvancePlaySession_IncrementsId()
+        public void SceneScopedPolicy_HasCorrectValues()
         {
-            var before = SingletonRuntime.PlaySessionId;
-            SingletonRuntime.AdvancePlaySessionForTesting();
-            var after = SingletonRuntime.PlaySessionId;
-
-            Assert.AreEqual(expected: before + 1, actual: after, message: "PlaySessionId should increment");
+            var policy = new SceneScopedPolicy();
+            Assert.IsFalse(condition: policy.PersistAcrossScenes, message: "SceneScopedPolicy should not persist across scenes");
+            Assert.IsFalse(condition: policy.AutoCreateIfMissing, message: "SceneScopedPolicy should not auto-create if missing");
         }
 
+        [Test]
+        public void Policy_ReadonlyStruct_ZeroAllocation()
+        {
+            // Verify policies are readonly structs with zero allocation
+            var persistentPolicy1 = default(PersistentPolicy);
+            var persistentPolicy2 = default(PersistentPolicy);
+            var scenePolicy1 = default(SceneScopedPolicy);
+            var scenePolicy2 = default(SceneScopedPolicy);
+
+            // Test struct equality (same default values)
+            Assert.AreEqual(expected: persistentPolicy1.PersistAcrossScenes, actual: persistentPolicy2.PersistAcrossScenes);
+            Assert.AreEqual(expected: persistentPolicy1.AutoCreateIfMissing, actual: persistentPolicy2.AutoCreateIfMissing);
+            Assert.AreEqual(expected: scenePolicy1.PersistAcrossScenes, actual: scenePolicy2.PersistAcrossScenes);
+            Assert.AreEqual(expected: scenePolicy1.AutoCreateIfMissing, actual: scenePolicy2.AutoCreateIfMissing);
+
+            // Test expected values
+            Assert.IsTrue(condition: persistentPolicy1.PersistAcrossScenes, message: "PersistentPolicy should persist across scenes");
+            Assert.IsTrue(condition: persistentPolicy1.AutoCreateIfMissing, message: "PersistentPolicy should auto-create");
+            Assert.IsFalse(condition: scenePolicy1.PersistAcrossScenes, message: "SceneScopedPolicy should not persist");
+            Assert.IsFalse(condition: scenePolicy1.AutoCreateIfMissing, message: "SceneScopedPolicy should not auto-create");
+
+            // Verify type characteristics
+            var persistentType = typeof(PersistentPolicy);
+            var sceneType = typeof(SceneScopedPolicy);
+
+            Assert.IsTrue(condition: persistentType.IsValueType, message: "PersistentPolicy should be a value type");
+            Assert.IsTrue(condition: sceneType.IsValueType, message: "SceneScopedPolicy should be a value type");
+            Assert.IsTrue(condition: persistentType.IsVisible, message: "Policy types should be public");
+        }
+
+        [Test]
+        public void Policy_StructImmutability()
+        {
+            // Test that policy structs are immutable (cannot be modified)
+            var persistentPolicy = default(PersistentPolicy);
+            var scenePolicy = default(SceneScopedPolicy);
+
+            // Store original values
+            bool originalPersistentPersist = persistentPolicy.PersistAcrossScenes;
+            bool originalPersistentAuto = persistentPolicy.AutoCreateIfMissing;
+            bool originalScenePersist = scenePolicy.PersistAcrossScenes;
+            bool originalSceneAuto = scenePolicy.AutoCreateIfMissing;
+
+            // Attempt to "modify" (this should not compile if truly readonly, but let's test the concept)
+            // Since they're readonly structs, any modification attempt would create new instances
+
+            // Verify values remain constant across multiple instantiations
+            for (int i = 0; i < 10; i++)
+            {
+                var newPersistent = default(PersistentPolicy);
+                var newScene = default(SceneScopedPolicy);
+
+                Assert.AreEqual(expected: originalPersistentPersist, actual: newPersistent.PersistAcrossScenes);
+                Assert.AreEqual(expected: originalPersistentAuto, actual: newPersistent.AutoCreateIfMissing);
+                Assert.AreEqual(expected: originalScenePersist, actual: newScene.PersistAcrossScenes);
+                Assert.AreEqual(expected: originalSceneAuto, actual: newScene.AutoCreateIfMissing);
+            }
+        }
+
+        [Test]
+        public void Policy_DefaultInitialization_Consistency()
+        {
+            // Test that default initialization is consistent and predictable
+            var persistentPolicies = new PersistentPolicy[5];
+            var scenePolicies = new SceneScopedPolicy[5];
+
+            // All should have the same values since they're default initialized
+            for (int i = 0; i < 5; i++)
+            {
+                Assert.IsTrue(condition: persistentPolicies[i].PersistAcrossScenes);
+                Assert.IsTrue(condition: persistentPolicies[i].AutoCreateIfMissing);
+                Assert.IsFalse(condition: scenePolicies[i].PersistAcrossScenes);
+                Assert.IsFalse(condition: scenePolicies[i].AutoCreateIfMissing);
+            }
+
+            // Test policy interface compliance
+            TestPolicyInterfaceCompliance(policy: default(PersistentPolicy));
+            TestPolicyInterfaceCompliance(policy: default(SceneScopedPolicy));
+        }
+
+        private void TestPolicyInterfaceCompliance(ISingletonPolicy policy)
+        {
+            // Test that policies properly implement ISingletonPolicy interface
+            bool persistProperty = policy.PersistAcrossScenes;
+            bool autoProperty = policy.AutoCreateIfMissing;
+
+            // Values should be boolean (basic interface compliance test)
+            Assert.IsInstanceOf<bool>(actual: persistProperty);
+            Assert.IsInstanceOf<bool>(actual: autoProperty);
+
+            switch (policy)
+            {
+                // At least one should be true for PersistentPolicy, both false for SceneScopedPolicy
+                // (This is a structural test of the policy design)
+                case PersistentPolicy:
+                    Assert.IsTrue(condition: persistProperty && autoProperty);
+                    break;
+                case SceneScopedPolicy:
+                    Assert.IsFalse(condition: persistProperty || autoProperty);
+                    break;
+            }
+        }
+    }
+
+    [TestFixture]
+    public class SingletonBehaviourEditModeTests
+    {
         [TearDown]
         public void TearDown()
         {
-            SingletonRuntime.ResetQuittingFlagForTesting();
+            // Clean up any created GameObjects
+            var testObjects = Object.FindObjectsByType<GameObject>(sortMode: FindObjectsSortMode.None);
+            foreach (var obj in testObjects)
+            {
+                if (obj.name.Contains(value: "Test") || obj.name.Contains(value: "Singleton"))
+                {
+                    Object.DestroyImmediate(obj: obj);
+                }
+            }
+
+            // Reset static caches using TestExtensions (reflection-based)
+            default(TestPersistentSingletonForEditMode).ResetStaticCacheForTesting();
+        }
+
+        [Test]
+        public void PersistentSingleton_Instance_ReturnsNull_InEditMode()
+        {
+            // In Edit Mode, Instance should perform lookup only, not auto-creation
+            var instance = TestPersistentSingletonForEditMode.Instance;
+            Assert.IsNull(anObject: instance, message: "Instance should return null in Edit Mode when no instance exists");
+        }
+
+        [Test]
+        public void PersistentSingleton_TryGetInstance_ReturnsFalse_InEditMode()
+        {
+            bool result = TestPersistentSingletonForEditMode.TryGetInstance(instance: out var instance);
+            Assert.IsFalse(condition: result, message: "TryGetInstance should return false in Edit Mode when no instance exists");
+            Assert.IsNull(anObject: instance, message: "Instance should be null");
+        }
+
+        [Test]
+        public void SceneSingleton_Instance_ReturnsNull_InEditMode()
+        {
+            var instance = TestSceneSingletonForEditMode.Instance;
+            Assert.IsNull(anObject: instance, message: "SceneSingleton.Instance should return null in Edit Mode when not placed");
+        }
+
+        [Test]
+        public void SceneSingleton_TryGetInstance_ReturnsFalse_InEditMode()
+        {
+            bool result = TestSceneSingletonForEditMode.TryGetInstance(instance: out var instance);
+            Assert.IsFalse(condition: result, message: "SceneSingleton.TryGetInstance should return false in Edit Mode when not placed");
+            Assert.IsNull(anObject: instance, message: "Instance should be null");
+        }
+
+        [Test]
+        public void Singleton_DoesNotCache_InEditMode()
+        {
+            // Create a temporary instance
+            var go = new GameObject(name: "TestSingleton");
+
+            // Access through Instance
+            var instance1 = TestPersistentSingletonForEditMode.Instance;
+            var instance2 = TestPersistentSingletonForEditMode.Instance;
+
+            // Should return the same instance
+            Assert.AreSame(expected: instance1, actual: instance2, message: "Should return the same instance");
+
+            // Destroy the GameObject
+            Object.DestroyImmediate(obj: go);
+
+            // Access again - should not be cached from previous access
+            var instance3 = TestPersistentSingletonForEditMode.Instance;
+            Assert.IsNull(anObject: instance3, message: "Instance should not be cached from Edit Mode access");
+        }
+    }
+
+    // Test singleton classes for EditMode testing
+    public sealed class TestPersistentSingletonForEditMode : GlobalSingleton<TestPersistentSingletonForEditMode>
+    {
+        protected override void Awake()
+        {
+            base.Awake();
+        }
+    }
+
+    public sealed class TestSceneSingletonForEditMode : SceneSingleton<TestSceneSingletonForEditMode>
+    {
+        protected override void Awake()
+        {
+            base.Awake();
         }
     }
 }

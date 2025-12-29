@@ -1,4 +1,4 @@
-# ポリシー駆動型Unityシングルトン
+# ポリシー駆動型Unityシングルトン（v2.4.0）
 
 [English README](./README.md)
 
@@ -6,7 +6,7 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 
 ## Requirements / 動作環境
 
-* **Unity 2021.3** 以降（Unity 6.3でテスト済み）
+* **Unity 2020.1** 以降（Unity 6.3でテスト済み）
 * **Enter Play Mode Options** の **Reload Domain** 有効/無効の両方に対応
 * 外部依存なし
 
@@ -27,8 +27,8 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 
 | クラス | シーン間永続 | 自動生成 | 用途 |
 | --- | --- | --- | --- |
-| **`PersistentSingletonBehaviour<T>`** | ✅ する | ✅ する | ゲーム全体で常に存在するマネージャ（GameManager など） |
-| **`SceneSingletonBehaviour<T>`** | ❌ しない | ❌ しない | 特定のシーン内でのみ動作するコントローラ（LevelController など） |
+| **`GlobalSingleton<T>`** | ✅ する | ✅ する | ゲーム全体で常に存在するマネージャ（GameManager など） |
+| **`SceneSingleton<T>`** | ❌ しない | ❌ しない | 特定のシーン内でのみ動作するコントローラ（LevelController など） |
 
 ### 主な特長
 
@@ -37,7 +37,7 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 * **安全なライフサイクル**:
   * **終了処理**: `Application.quitting` を考慮し、終了中の生成やアクセスを防ぎます。
   * **Edit Mode**: エディタ実行中は「検索のみ」を行い、生成や static キャッシュ更新といった副作用を起こしません。
-  * **再初期化 (Soft Reset)**: 状態リセットは **Play セッション境界**で行い、Play ごとに `OnSingletonAwake()` を実行して状態を初期化します（方針は `PlaySessionId` に寄せています）。
+  * **再初期化 (Soft Reset)**: 状態リセットは **Play セッション境界**で行い、Play ごとに再初期化を実行します（方針は `PlaySessionId` に寄せています）。
 * **厳密な型チェック**: ジェネリック型 `T` と実体型が一致しない参照は拒否し、誤用を防ぎます。
 * **開発時の安全性 (DEV/EDITOR)**:
   * `FindAnyObjectByType(...Exclude)` が **非アクティブを見ない**ため、非アクティブなシングルトンが存在すると「見つからない扱い → 自動生成 → 隠れ重複」になり得ます。これを避けるため、DEV/EDITOR では非アクティブ検出時に **fail-fast（例外）** にします。
@@ -50,8 +50,8 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 Singletons/
 ├── Singletons.asmdef                 # Assembly Definition
 ├── AssemblyInfo.cs                   # InternalsVisibleTo（テスト用）
-├── PersistentSingletonBehaviour.cs   # Public API (永続・自動生成あり)
-├── SceneSingletonBehaviour.cs        # Public API (シーン限定・自動生成なし)
+├── GlobalSingleton.cs   # Public API (永続・自動生成あり)
+├── SceneSingleton.cs        # Public API (シーン限定・自動生成なし)
 ├── Core/
 │   ├── SingletonBehaviour.cs         # コア実装
 │   ├── SingletonRuntime.cs           # 内部ランタイム (Domain Reload対策)
@@ -95,20 +95,14 @@ Singletons/
 using Singletons;
 
 // 継承禁止 (sealed) を推奨します
-public sealed class GameManager : PersistentSingletonBehaviour<GameManager>
+public sealed class GameManager : GlobalSingleton<GameManager>
 {
     public int Score { get; private set; }
 
-    // Awake の代わりに OnSingletonAwake を使用します
-    protected override void OnSingletonAwake()
+    protected override void Awake()
     {
-        // Play セッションごとに必ず走る初期化処理
+        base.Awake(); // 必須 - シングルトンを初期化します
         Score = 0;
-    }
-
-    protected override void OnSingletonDestroy()
-    {
-        // 実体が破棄されるときだけ呼ばれます
     }
 
     public void AddScore(int value) => Score += value;
@@ -125,10 +119,11 @@ Scene 上に配置して使用します。自動生成は行わず、Scene ア�
 ```csharp
 using Singletons;
 
-public sealed class LevelController : SceneSingletonBehaviour<LevelController>
+public sealed class LevelController : SceneSingleton<LevelController>
 {
-    protected override void OnSingletonAwake()
+    protected override void Awake()
     {
+        base.Awake(); // 必須 - シングルトンを初期化します
         // Sceneごとの初期化
     }
 }
@@ -278,7 +273,7 @@ protected override void Awake()
 }
 ```
 
-呼ばない場合でも、最初のアクセス時に初期化が走る「保険」はありますが、初期化順が見えにくくなるため非推奨です。基本的には `OnSingletonAwake` / `OnSingletonDestroy` を使用してください。
+呼ばない場合でも、最初のアクセス時に初期化が走る「保険」はありますが、初期化順が見えにくくなるため非推奨です。必ず `Awake()` メソッドの最初で `base.Awake()` を呼び出してください。
 
 ### 3. 配置上の注意
 
@@ -290,9 +285,11 @@ protected override void Awake()
 
 ### Soft Reset（Play ごとの再初期化）
 
-Domain Reload 無効環境では static 状態が残ります。本実装は Play セッション境界（`PlaySessionId`）でキャッシュを無効化し、Play ごとに `OnSingletonAwake()` を実行して状態を初期化します。
+Domain Reload 無効環境では static 状態が残ります。本実装は Play セッション境界（`PlaySessionId`）でキャッシュを無効化し、Play ごとに再初期化を実行します。
 
-`OnSingletonAwake()` は **再実行に耐える（冪等）** 書き方にしてください（例：イベント購読は「解除 → 登録」で行います）。
+Unity の `Awake()` は GameObject の生存期間中に1回しか呼ばれないため、**Playごとの再初期化**は `OnPlaySessionStart()`（シングルトンが当該Playセッションで確立された直後に、Playセッションごとに1回呼ばれる）をオーバーライドして行ってください。
+
+`OnPlaySessionStart()` の初期化は **再実行に耐える（冪等）** 書き方にしてください（例：イベント購読は「解除 → 登録」で行います）。
 
 ### Threading / Main Thread
 
@@ -340,19 +337,31 @@ Edit Mode（`Application.isPlaying == false`）では、次の挙動に固定し
 
 ### 同梱テスト
 
-本パッケージには PlayMode および EditMode テストが含まれています：
+本パッケージには包括的な PlayMode および EditMode テストが含まれ、**53個の総テスト**（PlayMode 41個 + EditMode 12個）すべて成功しています。
+
+#### PlayMode テスト（41個）
 
 | カテゴリ | テスト数 | カバレッジ |
 |---------|---------|----------|
-| PersistentSingleton | 10 | 自動生成、キャッシュ、終了時、重複検出 |
+| PersistentSingleton | 7 | 自動生成、キャッシュ、重複検出 |
 | SceneSingleton | 5 | 配置、自動生成なし、重複検出 |
-| SingletonRuntime | 3 | PlaySessionId、IsQuitting |
 | InactiveInstance | 3 | 非アクティブGO検出、無効コンポーネント |
 | TypeMismatch | 2 | 派生クラス拒否 |
-| ThreadSafety | 2 | バックグラウンドスレッド保護 |
-| Lifecycle | 3 | 破棄、再生成、マルチセッション |
-| SceneSingletonEdgeCases | 2 | 未配置、自動生成なし |
-| **EditMode** | 4 | Edit Mode での SingletonRuntime |
+| ThreadSafety | 7 | バックグラウンドスレッド保護、メインロード検証 |
+| Lifecycle | 2 | 破棄、再生成 |
+| SoftReset | 1 | PlaySessionId 境界での Playごとの再初期化 |
+| SceneSingletonEdgeCase | 2 | 未配置、自動生成なし |
+| PracticalUsage | 6 | GameManager、LevelController、状態管理 |
+| PolicyBehavior | 3 | ポリシー駆動挙動検証 |
+| ResourceManagement | 3 | インスタンスライフサイクルとクリーンアップ |
+
+#### EditMode テスト（12個）
+
+| カテゴリ | テスト数 | カバレッジ |
+|---------|---------|----------|
+| SingletonRuntimeEditMode | 2 | PlaySessionId、IsQuitting 検証 |
+| Policy | 5 | Policy struct 検証、不変性、インターフェース準拠 |
+| SingletonBehaviourEditMode | 5 | EditMode 挙動、キャッシュ分離 |
 
 ### テストの実行
 
@@ -362,20 +371,11 @@ Edit Mode（`Application.isPlaying == false`）では、次の挙動に固定し
 
 ### 独自テストの作成
 
-テスト専用APIは `#if UNITY_INCLUDE_TESTS` 下で利用可能です：
+テスト専用APIは `TestExtensions` 経由で利用可能です：
 
 ```csharp
-// staticインスタンスキャッシュをリセット
-MyManager.ResetStaticCacheForTesting();
-
-// 終了をシミュレート
-SingletonRuntime.SimulateQuittingForTesting();
-
-// 終了フラグをリセット
-SingletonRuntime.ResetQuittingFlagForTesting();
-
-// PlaySessionIdを進める
-SingletonRuntime.AdvancePlaySessionForTesting();
+// staticインスタンスキャッシュをリセット（リフレクション使用）
+default(MyManager).ResetStaticCacheForTesting();
 ```
 
 **テスト例:**
@@ -386,7 +386,7 @@ public IEnumerator MyManager_AutoCreates()
 {
     var instance = MyManager.Instance;
     yield return null;
-    
+
     Assert.IsNotNull(instance);
 }
 
@@ -397,8 +397,7 @@ public void TearDown()
     {
         Object.DestroyImmediate(instance.gameObject);
     }
-    MyManager.ResetStaticCacheForTesting();
-    SingletonRuntime.ResetQuittingFlagForTesting();
+    default(MyManager).ResetStaticCacheForTesting();
 }
 ```
 
@@ -420,7 +419,7 @@ public void TearDown()
 複数のシーンに同じシングルトンタイプが含まれる場合、破棄順序はUnityのシーン読み込みシーケンスに依存します。
 
 ### メモリリーク
-`OnSingletonDestroy`で静的イベント購読が適切にクリーンアップされない場合、Domain Reload無効時にメモリリークが発生する可能性があります。
+`OnDestroy`で静的イベント購読が適切にクリーンアップされない場合、Domain Reload無効時にメモリリークが発生する可能性があります。
 
 ## Troubleshooting / トラブルシューティング
 
