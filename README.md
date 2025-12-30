@@ -1,4 +1,4 @@
-# Policy-Driven Unity Singleton (v3.0.2)
+# Policy-Driven Unity Singleton (v3.0.3)
 
 [Japanese README](./README.ja.md)
 
@@ -409,9 +409,9 @@ This is **intended behavior** for this singleton design, so align your team on o
 
 ### Included Tests
 
-This package includes comprehensive PlayMode and EditMode tests with **53 total tests** (41 PlayMode + 12 EditMode), all passing.
+This package includes comprehensive PlayMode and EditMode tests with **73 total tests** (53 PlayMode + 20 EditMode), all passing.
 
-#### PlayMode Tests (41 tests)
+#### PlayMode Tests (53 tests)
 
 | Category | Tests | Coverage |
 |----------|-------|----------|
@@ -426,14 +426,21 @@ This package includes comprehensive PlayMode and EditMode tests with **53 total 
 | PracticalUsage | 6 | GameManager, LevelController, state management |
 | PolicyBehavior | 3 | Policy-driven behavior validation |
 | ResourceManagement | 3 | Instance lifecycle and cleanup |
+| DomainReload | 6 | PlaySessionId boundary, cache invalidation, quitting state |
+| ParentHierarchy | 2 | Root reparenting for DontDestroyOnLoad |
+| BaseAwakeEnforcement | 1 | base.Awake() call detection |
+| EdgeCase | 3 | Destroyed instance cleanup, rapid access, placement timing |
 
-#### EditMode Tests (12 tests)
+#### EditMode Tests (20 tests)
 
 | Category | Tests | Coverage |
 |----------|-------|----------|
 | SingletonRuntimeEditMode | 2 | PlaySessionId, IsQuitting validation |
 | Policy | 5 | Policy struct validation, immutability, interface compliance |
 | SingletonBehaviourEditMode | 5 | EditMode behavior, caching isolation |
+| SingletonLifecycleEditMode | 3 | Parent hierarchy, creation, coexistence in Edit Mode |
+| SingletonRuntimeStateEditMode | 2 | NotifyQuitting, PlaySessionId consistency |
+| SingletonLoggerEditMode | 3 | LogWarning, LogError, ThrowInvalidOperation APIs |
 
 ### Running Tests
 

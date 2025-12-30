@@ -1112,4 +1112,339 @@ namespace Singletons.Tests.Runtime
             Assert.AreEqual(expected: "MainMenu", actual: gm2.CurrentLevel, message: "Should have fresh level");
         }
     }
+
+    /// <summary>
+    /// Tests for Domain Reload disabled scenarios.
+    /// These tests verify that singleton infrastructure properly handles
+    /// Play session boundaries when Domain Reload is disabled.
+    /// </summary>
+    [TestFixture]
+    public class DomainReloadTests
+    {
+        [TearDown]
+        public void TearDown()
+        {
+            // Reset quitting flag FIRST so TryGetInstance works
+            TestExtensions.ResetQuittingFlagForTesting();
+
+            // Clean up instances directly to avoid TryGetInstance issues
+            var softResetInstances = Object.FindObjectsByType<TestSoftResetSingleton>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            foreach (var inst in softResetInstances)
+            {
+                Object.DestroyImmediate(obj: inst.gameObject);
+            }
+
+            var persistentInstances = Object.FindObjectsByType<TestPersistentSingleton>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            foreach (var inst in persistentInstances)
+            {
+                Object.DestroyImmediate(obj: inst.gameObject);
+            }
+
+            default(TestSoftResetSingleton).ResetStaticCacheForTesting();
+            default(TestPersistentSingleton).ResetStaticCacheForTesting();
+        }
+
+        [UnityTest]
+        public IEnumerator StaticCache_IsInvalidated_WhenPlaySessionIdChanges()
+        {
+            // Create and cache instance
+            var instance = TestPersistentSingleton.Instance;
+            yield return null;
+
+            Assert.IsNotNull(anObject: instance, message: "Instance should be created");
+
+            // Simulate Play session boundary (Domain Reload disabled scenario)
+            TestExtensions.AdvancePlaySessionIdForTesting();
+
+            // Access again - cache should be invalidated but same GameObject reused
+            var sameInstance = TestPersistentSingleton.Instance;
+            yield return null;
+
+            Assert.AreSame(expected: instance, actual: sameInstance, message: "Should return same GameObject instance");
+        }
+
+        [UnityTest]
+        public IEnumerator OnPlaySessionStart_IsCalledAgain_AfterPlaySessionBoundary()
+        {
+            var instance = TestSoftResetSingleton.Instance;
+            yield return null;
+
+            Assert.AreEqual(expected: 1, actual: instance.PlaySessionStartCalls, message: "OnPlaySessionStart should be called once initially");
+
+            // Simulate multiple Play session boundaries
+            TestExtensions.AdvancePlaySessionIdForTesting();
+            _ = TestSoftResetSingleton.Instance;
+            yield return null;
+
+            Assert.AreEqual(expected: 2, actual: instance.PlaySessionStartCalls, message: "OnPlaySessionStart should be called again after boundary");
+
+            TestExtensions.AdvancePlaySessionIdForTesting();
+            _ = TestSoftResetSingleton.Instance;
+            yield return null;
+
+            Assert.AreEqual(expected: 3, actual: instance.PlaySessionStartCalls, message: "OnPlaySessionStart should be called for each Play session");
+        }
+
+        [UnityTest]
+        public IEnumerator AwakeCount_DoesNotIncrease_OnPlaySessionBoundary()
+        {
+            var instance = TestSoftResetSingleton.Instance;
+            yield return null;
+
+            Assert.AreEqual(expected: 1, actual: instance.AwakeCalls, message: "Awake should be called once on creation");
+
+            // Cross multiple Play session boundaries
+            for (int i = 0; i < 3; i++)
+            {
+                TestExtensions.AdvancePlaySessionIdForTesting();
+                _ = TestSoftResetSingleton.Instance;
+                yield return null;
+            }
+
+            Assert.AreEqual(expected: 1, actual: instance.AwakeCalls, message: "Awake should NOT be called again on Play session boundary");
+        }
+
+        [UnityTest]
+        public IEnumerator TryGetInstance_WorksCorrectly_AcrossPlaySessionBoundary()
+        {
+            var instance = TestPersistentSingleton.Instance;
+            yield return null;
+
+            bool resultBefore = TestPersistentSingleton.TryGetInstance(instance: out var retrieved1);
+            Assert.IsTrue(condition: resultBefore, message: "Should find instance before boundary");
+            Assert.AreSame(expected: instance, actual: retrieved1);
+
+            // Cross Play session boundary
+            TestExtensions.AdvancePlaySessionIdForTesting();
+
+            bool resultAfter = TestPersistentSingleton.TryGetInstance(instance: out var retrieved2);
+            Assert.IsTrue(condition: resultAfter, message: "Should still find instance after boundary");
+            Assert.AreSame(expected: instance, actual: retrieved2, message: "Should return same instance");
+        }
+
+        [UnityTest]
+        public IEnumerator Instance_ReturnsNull_WhenQuitting()
+        {
+            var instance = TestPersistentSingleton.Instance;
+            yield return null;
+
+            Assert.IsNotNull(anObject: instance, message: "Instance should exist before quitting");
+
+            // Simulate quitting
+            Core.SingletonRuntime.NotifyQuitting();
+
+            // TryGetInstance should return false during quit
+            bool result = TestPersistentSingleton.TryGetInstance(instance: out var retrieved);
+            Assert.IsFalse(condition: result, message: "TryGetInstance should return false when quitting");
+            Assert.IsNull(anObject: retrieved, message: "Retrieved instance should be null when quitting");
+        }
+
+        [UnityTest]
+        public IEnumerator NewInstance_IsNotCreated_WhenQuitting()
+        {
+            // Simulate quitting before any instance exists
+            Core.SingletonRuntime.NotifyQuitting();
+
+            // Try to access Instance - should return null, not create new
+            var instance = TestPersistentSingleton.Instance;
+
+            Assert.IsNull(anObject: instance, message: "Should not create instance when quitting");
+
+            // Verify no instance was created
+            var found = Object.FindAnyObjectByType<TestPersistentSingleton>();
+            Assert.IsNull(anObject: found, message: "No instance should exist in scene");
+
+            yield return null;
+        }
+    }
+
+    /// <summary>
+    /// Tests for singleton behavior with parent GameObjects.
+    /// </summary>
+    [TestFixture]
+    public class ParentHierarchyTests
+    {
+        [TearDown]
+        public void TearDown()
+        {
+            var allObjects = Object.FindObjectsByType<TestPersistentSingleton>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            foreach (var obj in allObjects)
+            {
+                Object.DestroyImmediate(obj: obj.gameObject);
+            }
+
+            // Clean up any parent objects
+            var parents = Object.FindObjectsByType<GameObject>(sortMode: FindObjectsSortMode.None);
+            foreach (var parent in parents)
+            {
+                if (parent.name.Contains(value: "Parent"))
+                {
+                    Object.DestroyImmediate(obj: parent);
+                }
+            }
+
+            default(TestPersistentSingleton).ResetStaticCacheForTesting();
+        }
+
+        [UnityTest]
+        public IEnumerator PersistentSingleton_WithParent_IsReparentedToRoot()
+        {
+            // Create parent-child hierarchy
+            var parent = new GameObject(name: "ParentObject");
+            var child = new GameObject(name: "TestPersistentSingleton");
+            child.transform.SetParent(p: parent.transform);
+
+            // Expect warning log about reparenting
+            LogAssert.Expect(type: LogType.Warning, message: new System.Text.RegularExpressions.Regex(pattern: @".*Reparented.*root.*"));
+
+            // Add singleton component
+            child.AddComponent<TestPersistentSingleton>();
+            yield return null;
+
+            // Access via Instance to trigger initialization
+            var instance = TestPersistentSingleton.Instance;
+            yield return null;
+
+            // Should be reparented to root for DontDestroyOnLoad
+            Assert.IsNull(anObject: instance.transform.parent, message: "Singleton should be reparented to root");
+        }
+
+        [UnityTest]
+        public IEnumerator AutoCreatedSingleton_HasNoParent()
+        {
+            // Auto-create singleton
+            var instance = TestPersistentSingleton.Instance;
+            yield return null;
+
+            Assert.IsNull(anObject: instance.transform.parent, message: "Auto-created singleton should have no parent");
+            Assert.AreEqual(expected: "TestPersistentSingleton", actual: instance.gameObject.name, message: "Auto-created singleton should have type name");
+        }
+    }
+
+    /// <summary>
+    /// Tests for base.Awake() call enforcement.
+    /// </summary>
+    public sealed class TestSingletonWithoutBaseAwake : GlobalSingleton<TestSingletonWithoutBaseAwake>
+    {
+        public bool AwakeWasCalled { get; private set; }
+
+        protected override void Awake()
+        {
+            // Deliberately NOT calling base.Awake() to test error detection
+            AwakeWasCalled = true;
+        }
+    }
+
+    [TestFixture]
+    public class BaseAwakeEnforcementTests
+    {
+        [TearDown]
+        public void TearDown()
+        {
+            var allObjects = Object.FindObjectsByType<TestSingletonWithoutBaseAwake>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            foreach (var obj in allObjects)
+            {
+                Object.DestroyImmediate(obj: obj.gameObject);
+            }
+
+            default(TestSingletonWithoutBaseAwake).ResetStaticCacheForTesting();
+        }
+
+        [UnityTest]
+        public IEnumerator Singleton_LogsError_WhenBaseAwakeNotCalled()
+        {
+            // Expect error log about base.Awake() not being called
+            LogAssert.Expect(type: LogType.Error, message: new System.Text.RegularExpressions.Regex(pattern: @".*base\.Awake\(\).*not called.*"));
+
+            var go = new GameObject(name: "TestSingletonWithoutBaseAwake");
+            var singleton = go.AddComponent<TestSingletonWithoutBaseAwake>();
+            yield return null;
+
+            // Awake was called but base.Awake() was not - OnEnable should log error
+            Assert.IsTrue(condition: singleton.AwakeWasCalled, message: "Custom Awake should have been called");
+        }
+    }
+
+    /// <summary>
+    /// Tests for edge cases and error recovery.
+    /// </summary>
+    [TestFixture]
+    public class EdgeCaseTests
+    {
+        [TearDown]
+        public void TearDown()
+        {
+            if (TestSceneSingleton.TryGetInstance(instance: out var scene))
+            {
+                Object.DestroyImmediate(obj: scene.gameObject);
+            }
+
+            if (TestPersistentSingleton.TryGetInstance(instance: out var persistent))
+            {
+                Object.DestroyImmediate(obj: persistent.gameObject);
+            }
+
+            default(TestSceneSingleton).ResetStaticCacheForTesting();
+            default(TestPersistentSingleton).ResetStaticCacheForTesting();
+            TestExtensions.ResetQuittingFlagForTesting();
+        }
+
+        [UnityTest]
+        public IEnumerator DestroyedInstance_IsProperlyCleanedUp_FromCache()
+        {
+            var instance = TestPersistentSingleton.Instance;
+            yield return null;
+
+            Assert.IsNotNull(anObject: instance);
+
+            // Destroy via DestroyImmediate
+            Object.DestroyImmediate(obj: instance.gameObject);
+
+            // Cache should be cleared
+            bool exists = TestPersistentSingleton.TryGetInstance(instance: out var retrieved);
+            Assert.IsFalse(condition: exists, message: "TryGetInstance should return false after destruction");
+            Assert.IsNull(anObject: retrieved, message: "Retrieved instance should be null");
+        }
+
+        [UnityTest]
+        public IEnumerator MultipleRapidAccesses_ReturnSameInstance()
+        {
+            TestPersistentSingleton[] instances = new TestPersistentSingleton[10];
+
+            for (int i = 0; i < 10; i++)
+            {
+                instances[i] = TestPersistentSingleton.Instance;
+            }
+
+            yield return null;
+
+            for (int i = 1; i < 10; i++)
+            {
+                Assert.AreSame(expected: instances[0], actual: instances[i], message: $"Access {i} should return same instance");
+            }
+
+            Assert.AreEqual(expected: 1, actual: Object.FindObjectsByType<TestPersistentSingleton>(sortMode: FindObjectsSortMode.None).Length, message: "Only one instance should exist");
+        }
+
+        [UnityTest]
+        public IEnumerator SceneSingleton_AccessBeforePlacement_ThenPlacement_Works()
+        {
+            // Try to access before placement
+            bool beforeResult = TestSceneSingleton.TryGetInstance(instance: out var before);
+            Assert.IsFalse(condition: beforeResult, message: "Should not find instance before placement");
+            Assert.IsNull(anObject: before);
+
+            yield return null;
+
+            // Now place instance
+            var go = new GameObject(name: "TestSceneSingleton");
+            var placed = go.AddComponent<TestSceneSingleton>();
+            yield return null;
+
+            // Should now find it
+            bool afterResult = TestSceneSingleton.TryGetInstance(instance: out var after);
+            Assert.IsTrue(condition: afterResult, message: "Should find instance after placement");
+            Assert.AreSame(expected: placed, actual: after);
+        }
+    }
 }

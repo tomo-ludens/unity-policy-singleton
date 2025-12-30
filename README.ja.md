@@ -1,4 +1,4 @@
-# ポリシー駆動型Unityシングルトン（v3.0.2）
+# ポリシー駆動型Unityシングルトン（v3.0.3）
 
 [English README](./README.md)
 
@@ -409,9 +409,9 @@ Edit Mode（`Application.isPlaying == false`）では、次の挙動に固定し
 
 ### 同梱テスト
 
-本パッケージには包括的な PlayMode および EditMode テストが含まれ、**53個の総テスト**（PlayMode 41個 + EditMode 12個）すべて成功しています。
+本パッケージには包括的な PlayMode および EditMode テストが含まれ、**73個の総テスト**（PlayMode 53個 + EditMode 20個）すべて成功しています。
 
-#### PlayMode テスト（41個）
+#### PlayMode テスト（53個）
 
 | カテゴリ | テスト数 | カバレッジ |
 |---------|---------|----------|
@@ -426,14 +426,21 @@ Edit Mode（`Application.isPlaying == false`）では、次の挙動に固定し
 | PracticalUsage | 6 | GameManager、LevelController、状態管理 |
 | PolicyBehavior | 3 | ポリシー駆動挙動検証 |
 | ResourceManagement | 3 | インスタンスライフサイクルとクリーンアップ |
+| DomainReload | 6 | PlaySessionId境界、キャッシュ無効化、終了状態 |
+| ParentHierarchy | 2 | DontDestroyOnLoad用のルート再配置 |
+| BaseAwakeEnforcement | 1 | base.Awake() 呼び出し検出 |
+| EdgeCase | 3 | 破棄インスタンスクリーンアップ、高速アクセス、配置タイミング |
 
-#### EditMode テスト（12個）
+#### EditMode テスト（20個）
 
 | カテゴリ | テスト数 | カバレッジ |
 |---------|---------|----------|
 | SingletonRuntimeEditMode | 2 | PlaySessionId、IsQuitting 検証 |
 | Policy | 5 | Policy struct 検証、不変性、インターフェース準拠 |
 | SingletonBehaviourEditMode | 5 | EditMode 挙動、キャッシュ分離 |
+| SingletonLifecycleEditMode | 3 | 親階層、生成、Edit Modeでの共存 |
+| SingletonRuntimeStateEditMode | 2 | NotifyQuitting、PlaySessionId一貫性 |
+| SingletonLoggerEditMode | 3 | LogWarning、LogError、ThrowInvalidOperation API |
 
 ### テストの実行
 
