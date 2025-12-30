@@ -4,6 +4,33 @@
 
 A **policy-driven singleton base class** for MonoBehaviour.
 
+## Table of Contents
+
+- [Requirements](#requirements)
+- [Performance Considerations](#performance-considerations)
+- [Overview](#overview)
+  - [Provided Classes](#provided-classes)
+  - [Key Features](#key-features)
+- [Directory Structure](#directory-structure)
+- [Dependencies](#dependencies-assumed-unity-api-behavior)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [GlobalSingleton](#1-globalsingleton)
+  - [SceneSingleton](#2-scenesingleton)
+  - [Choosing Between Instance and TryGetInstance](#3-choosing-between-instance-and-trygetinstance-typical-patterns)
+  - [Caching is Recommended](#4-caching-is-recommended-important)
+- [Public API Details](#public-api-details)
+- [Design Intent](#design-intent-notes)
+- [Constraints & Best Practices](#constraints--best-practices)
+- [Advanced Topics](#advanced-topics)
+- [Edit Mode Behavior](#edit-mode-behavior-details)
+- [IDE Configuration](#ide-configuration-rider--resharper)
+- [Testing](#testing)
+- [Known Limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
+- [References](#references)
+- [License](#license)
+
 ## Requirements
 
 * **Unity 2022.3** or later (tested with Unity 6.3)
@@ -98,19 +125,62 @@ using Singletons;
 public sealed class GameManager : GlobalSingleton<GameManager>
 {
     public int Score { get; private set; }
+    public int CurrentLevel { get; private set; }
 
     protected override void Awake()
     {
         base.Awake(); // Required - initializes singleton
         Score = 0;
+        CurrentLevel = 1;
+    }
+
+    // Per-play-session reinitialization (especially with Domain Reload disabled)
+    protected override void OnPlaySessionStart()
+    {
+        // Called at the start of each play session (Play Mode start or restart with Domain Reload disabled)
+        // Awake is called only on first run, but OnPlaySessionStart is called every play session
+        Debug.Log($"New play session started. Current level: {CurrentLevel}");
+        
+        // Reset session-specific state
+        // Example: temporary data, event subscriptions, caches, etc.
+        ResetTemporaryData();
+        RebindEvents();
+    }
+
+    private void ResetTemporaryData()
+    {
+        // Clear temporary data that shouldn't persist between play sessions
+        // Example: UI state, unsaved work-in-progress data, etc.
+    }
+
+    private void RebindEvents()
+    {
+        // Re-subscribe to events (in case subscriptions are lost with Domain Reload disabled)
+        // Example: GameManager.OnGameStateChanged += HandleGameStateChanged;
     }
 
     public void AddScore(int value) => Score += value;
+    public void NextLevel() => CurrentLevel++;
 }
 
 // Example:
 // GameManager.Instance.AddScore(10);
+// GameManager.Instance.NextLevel();
 ```
+
+#### Importance of OnPlaySessionStart
+
+`OnPlaySessionStart` is especially important when **Domain Reload is disabled**:
+
+| Method | Called When | Purpose |
+|--------|-------------|---------|
+| `Awake()` | Only on first Play Mode start | Persistent initialization (resource loading, static settings) |
+| `OnPlaySessionStart()` | **Every play session** | Session-specific initialization (temporary data, event subscriptions) |
+
+**Why is it needed?**
+- When Domain Reload is disabled, static fields persist between play sessions
+- Event subscriptions and temporary data might remain from the previous session
+- `OnPlaySessionStart` ensures a clean state for each session
 
 ### 2. SceneSingleton
 
