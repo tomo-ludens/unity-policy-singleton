@@ -1,4 +1,4 @@
-# ポリシー駆動型Unityシングルトン（v3.0.5）
+# ポリシー駆動型Unityシングルトン（v3.0.6）
 
 [English README](./README.md)
 
@@ -11,6 +11,14 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 - [概要](#overview--概要)
   - [提供クラス](#提供クラス)
   - [主な特長](#主な特長)
+- [アーキテクチャ](#architecture--アーキテクチャ)
+  - [コンポーネント概要](#コンポーネント概要)
+  - [ポリシー比較](#ポリシー比較)
+  - [Instance アクセスフロー](#instance-アクセスフロー)
+  - [シングルトンライフサイクル](#シングルトンライフサイクル)
+  - [Domain Reload 無効時: Play セッション境界](#domain-reload-無効時-play-セッション境界)
+  - [重複検出](#重複検出)
+  - [エラーハンドリングフロー](#エラーハンドリングフロー)
 - [ディレクトリ構成](#directory-structure--ディレクトリ構成)
 - [前提としている Unity API の挙動](#dependencies--前提としている-unity-api-の挙動)
 - [インストール](#installation--インストール)
@@ -70,6 +78,173 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
   * `FindAnyObjectByType(...Exclude)` が **非アクティブを見ない**ため、非アクティブなシングルトンが存在すると「見つからない扱い → 自動生成 → 隠れ重複」になり得ます。これを避けるため、DEV/EDITOR では非アクティブ検出時に **fail-fast（例外）** にします。
   * SceneSingleton をシーンに置き忘れた状態でアクセスした場合も、DEV/EDITOR では **fail-fast（例外）** にします。
 * **リリースビルド最適化**: ログや例外チェックはストリップされ、エラー時は `null` / `false` を返す設計です（利用側はハンドリングが必要です）。
+
+## Architecture / アーキテクチャ
+
+### コンポーネント概要
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                           Public API                                │
+│  ┌───────────────────────────┐    ┌───────────────────────────────┐ │
+│  │    GlobalSingleton<T>     │    │      SceneSingleton<T>        │ │
+│  │    (PersistentPolicy)     │    │     (SceneScopedPolicy)       │ │
+│  │  • DontDestroyOnLoad      │    │  • シーンライフサイクルに従う │ │
+│  │  • 未検出時に自動生成     │    │  • 自動生成なし               │ │
+│  └─────────────┬─────────────┘    └───────────────┬───────────────┘ │
+└────────────────┼──────────────────────────────────┼─────────────────┘
+                 │           継承                   │
+                 └──────────────┬───────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 SingletonBehaviour<T, TPolicy>                      │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌────────────────────────┐ │
+│  │    Instance     │ │  TryGetInstance │ │  ライフサイクルフック  │ │
+│  │   （自動生成）  │ │ （安全なアクセス）│ │  OnPlaySessionStart()  │ │
+│  └─────────────────┘ └─────────────────┘ └────────────────────────┘ │
+└─────────────────────────────┬───────────────────────────────────────┘
+                              │ 使用
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐
+│ SingletonRuntime│  │ ISingletonPolicy│  │    SingletonLogger      │
+│ • PlaySessionId │  │ • PersistAcross │  │ • Log/Warn/Error        │
+│ • IsQuitting    │  │   Scenes        │  │ • 条件付きコンパイル    │
+│ • スレッド検証  │  │ • AutoCreateIf  │  │ • リリースで除去        │
+│                 │  │   Missing       │  │                         │
+└────────┬────────┘  └─────────────────┘  └─────────────────────────┘
+         │ エディタフック
+         ▼
+┌─────────────────────┐
+│SingletonEditorHooks │
+│ (Play Modeイベント) │
+└─────────────────────┘
+```
+
+### ポリシー比較
+
+```mermaid
+classDiagram
+    class ISingletonPolicy {
+        <<interface>>
+        +bool PersistAcrossScenes
+        +bool AutoCreateIfMissing
+    }
+    class PersistentPolicy {
+        +PersistAcrossScenes = true
+        +AutoCreateIfMissing = true
+    }
+    class SceneScopedPolicy {
+        +PersistAcrossScenes = false
+        +AutoCreateIfMissing = false
+    }
+    ISingletonPolicy <|.. PersistentPolicy
+    ISingletonPolicy <|.. SceneScopedPolicy
+```
+
+### Instance アクセスフロー
+
+```mermaid
+flowchart TD
+    A[Instance アクセス] --> B{IsQuitting?}
+    B -->|Yes| C[null を返す]
+    C --> C1[DEV でログ出力]
+    B -->|No| D{キャッシュ有効?<br/>PlaySessionId 一致}
+    D -->|Yes| E[キャッシュを返す]
+    D -->|No| F[FindAnyObjectByType]
+    F --> G{見つかった?}
+    G -->|Yes| H[インスタンス検証]
+    G -->|No| I{AutoCreate<br/>ポリシー?}
+    I -->|Yes| J[新規インスタンス生成]
+    I -->|No| K{DEV/EDITOR?}
+    K -->|Yes| L[例外をスロー]
+    K -->|No| M[null を返す]
+    J --> H
+    H --> N{有効?}
+    N -->|Yes| O[キャッシュして返す]
+    N -->|No| K
+```
+
+### シングルトンライフサイクル
+
+```mermaid
+stateDiagram-v2
+    [*] --> 未生成
+    未生成 --> アクティブ : Instance アクセス（AutoCreate）<br/>または シーンロード（配置済み）
+    アクティブ --> アクティブ : 新 Play セッション<br/>（OnPlaySessionStart）
+    アクティブ --> 破棄済み : OnDestroy()
+    破棄済み --> アクティブ : 再アクセス（AutoCreate）
+    破棄済み --> [*] : アプリケーション終了
+
+    state アクティブ {
+        [*] --> 初期化済み
+        初期化済み --> セッションリセット : PlaySessionId 変更
+        セッションリセット --> 初期化済み : OnPlaySessionStart()
+    }
+```
+
+### Domain Reload 無効時: Play セッション境界
+
+```text
+ Play Session 1                          Play Session 2
+─────────────────────────────────────────────────────────────────────────▶
+                                                                    time
+    ┌─────────────────────┐              ┌─────────────────────┐
+    │  PlaySessionId: 1   │              │  PlaySessionId: 2   │
+    └─────────────────────┘              └─────────────────────┘
+              │                                    │
+    ┌─────────▼─────────┐              ┌─────────▼─────────┐
+    │ 静的キャッシュ OK │              │ 静的キャッシュ OK │
+    │ Instance: 0xABC   │   ───────▶   │ Instance: 0xABC   │（同一オブジェクト）
+    └───────────────────┘   無効化     └───────────────────┘
+                            & 更新
+                                 │
+                    ┌────────────▼────────────┐
+                    │ OnPlaySessionStart()    │
+                    │ 再度呼び出し            │
+                    │（セッション毎の再初期化）│
+                    └─────────────────────────┘
+```
+
+### 重複検出
+
+```mermaid
+sequenceDiagram
+    participant Scene as シーン
+    participant A as Singleton A（最初）
+    participant B as Singleton A'（重複）
+
+    Scene->>A: Awake()
+    A->>A: Instance として登録
+    Note over A: Instance = this
+
+    Scene->>B: Awake()
+    B->>A: 既存 Instance を確認
+    A-->>B: 既に存在
+    B->>B: 自身を破棄
+    Note over B: 警告ログ出力
+    destroy B
+```
+
+### エラーハンドリングフロー
+
+```mermaid
+flowchart TD
+    A[検証チェック] --> B{型一致?}
+    B -->|No| C{DEV/EDITOR?}
+    B -->|Yes| D{アクティブ状態?}
+    D -->|No| C
+    D -->|Yes| E{破棄されていない?}
+    E -->|No| C
+    E -->|Yes| F[✓ Instance を返す]
+
+    C -->|Yes| G[🚫 例外をスロー<br/>デバッグ用 fail-fast]
+    C -->|No| H[null/false を返す<br/>呼び出し側でハンドリング]
+
+    style F fill:#90EE90
+    style G fill:#FFB6C1
+    style H fill:#FFE4B5
+```
 
 ## Directory Structure / ディレクトリ構成
 

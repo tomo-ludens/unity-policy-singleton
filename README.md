@@ -1,4 +1,4 @@
-# Policy-Driven Unity Singleton (v3.0.5)
+# Policy-Driven Unity Singleton (v3.0.6)
 
 [Japanese README](./README.ja.md)
 
@@ -11,6 +11,14 @@ A **policy-driven singleton base class** for MonoBehaviour.
 - [Overview](#overview)
   - [Provided Classes](#provided-classes)
   - [Key Features](#key-features)
+- [Architecture](#architecture)
+  - [Component Overview](#component-overview)
+  - [Policy Comparison](#policy-comparison)
+  - [Instance Access Flow](#instance-access-flow)
+  - [Singleton Lifecycle](#singleton-lifecycle)
+  - [Domain Reload Disabled: Play Session Boundary](#domain-reload-disabled-play-session-boundary)
+  - [Duplicate Detection](#duplicate-detection)
+  - [Error Handling Flow](#error-handling-flow)
 - [Directory Structure](#directory-structure)
 - [Dependencies](#dependencies-assumed-unity-api-behavior)
 - [Installation](#installation)
@@ -70,6 +78,173 @@ They share the same core logic, while a **policy** controls the lifecycle behavi
   * `FindAnyObjectByType(...Exclude)` does **not** consider inactive objects, so an inactive singleton can be treated as "missing" → auto-created → silently duplicated. To prevent this, DEV/EDITOR uses **fail-fast** (throws) when an inactive singleton is detected.
   * Accessing a SceneSingleton that was not placed in the scene also uses **fail-fast** (throws) in DEV/EDITOR.
 * **Release build optimization**: Logs and validation checks are stripped; on error the API returns `null` / `false` (callers must handle this).
+
+## Architecture
+
+### Component Overview
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                           Public API                                │
+│  ┌───────────────────────────┐    ┌───────────────────────────────┐ │
+│  │    GlobalSingleton<T>     │    │      SceneSingleton<T>        │ │
+│  │    (PersistentPolicy)     │    │     (SceneScopedPolicy)       │ │
+│  │  • DontDestroyOnLoad      │    │  • Scene lifecycle bound      │ │
+│  │  • Auto-create if missing │    │  • No auto-create             │ │
+│  └─────────────┬─────────────┘    └───────────────┬───────────────┘ │
+└────────────────┼──────────────────────────────────┼─────────────────┘
+                 │          inheritance             │
+                 └──────────────┬───────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 SingletonBehaviour<T, TPolicy>                      │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌────────────────────────┐ │
+│  │    Instance     │ │  TryGetInstance │ │   Lifecycle Hooks      │ │
+│  │  (auto-create)  │ │  (safe access)  │ │  OnPlaySessionStart()  │ │
+│  └─────────────────┘ └─────────────────┘ └────────────────────────┘ │
+└─────────────────────────────┬───────────────────────────────────────┘
+                              │ uses
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐
+│ SingletonRuntime│  │ ISingletonPolicy│  │    SingletonLogger      │
+│ • PlaySessionId │  │ • PersistAcross │  │ • Log/Warn/Error        │
+│ • IsQuitting    │  │   Scenes        │  │ • Conditional compile   │
+│ • Thread check  │  │ • AutoCreateIf  │  │ • Stripped in release   │
+│                 │  │   Missing       │  │                         │
+└────────┬────────┘  └─────────────────┘  └─────────────────────────┘
+         │ editor hooks
+         ▼
+┌─────────────────────┐
+│SingletonEditorHooks │
+│ (Play Mode events)  │
+└─────────────────────┘
+```
+
+### Policy Comparison
+
+```mermaid
+classDiagram
+    class ISingletonPolicy {
+        <<interface>>
+        +bool PersistAcrossScenes
+        +bool AutoCreateIfMissing
+    }
+    class PersistentPolicy {
+        +PersistAcrossScenes = true
+        +AutoCreateIfMissing = true
+    }
+    class SceneScopedPolicy {
+        +PersistAcrossScenes = false
+        +AutoCreateIfMissing = false
+    }
+    ISingletonPolicy <|.. PersistentPolicy
+    ISingletonPolicy <|.. SceneScopedPolicy
+```
+
+### Instance Access Flow
+
+```mermaid
+flowchart TD
+    A[Instance Access] --> B{IsQuitting?}
+    B -->|Yes| C[Return null]
+    C --> C1[Log in DEV]
+    B -->|No| D{Cache Valid?<br/>PlaySessionId match}
+    D -->|Yes| E[Return Cached Instance]
+    D -->|No| F[FindAnyObjectByType]
+    F --> G{Found?}
+    G -->|Yes| H[Validate Instance]
+    G -->|No| I{AutoCreate<br/>Policy?}
+    I -->|Yes| J[Create New Instance]
+    I -->|No| K{DEV/EDITOR?}
+    K -->|Yes| L[Throw Exception]
+    K -->|No| M[Return null]
+    J --> H
+    H --> N{Valid?}
+    N -->|Yes| O[Cache & Return]
+    N -->|No| K
+```
+
+### Singleton Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> NotCreated
+    NotCreated --> Active : Instance access (AutoCreate)<br/>or Scene load (pre-placed)
+    Active --> Active : New Play Session<br/>(OnPlaySessionStart)
+    Active --> Destroyed : OnDestroy()
+    Destroyed --> Active : Re-access (AutoCreate)
+    Destroyed --> [*] : Application Quit
+
+    state Active {
+        [*] --> Initialized
+        Initialized --> SessionReset : PlaySessionId changed
+        SessionReset --> Initialized : OnPlaySessionStart()
+    }
+```
+
+### Domain Reload Disabled: Play Session Boundary
+
+```text
+ Play Session 1                          Play Session 2
+─────────────────────────────────────────────────────────────────────────▶
+                                                                    time
+    ┌─────────────────────┐              ┌─────────────────────┐
+    │  PlaySessionId: 1   │              │  PlaySessionId: 2   │
+    └─────────────────────┘              └─────────────────────┘
+              │                                    │
+    ┌─────────▼─────────┐              ┌─────────▼─────────┐
+    │ Static cache OK   │              │ Static cache OK   │
+    │ Instance: 0xABC   │   ───────▶   │ Instance: 0xABC   │ (same object)
+    └───────────────────┘   Invalidate └───────────────────┘
+                            & Refresh
+                                 │
+                    ┌────────────▼────────────┐
+                    │ OnPlaySessionStart()    │
+                    │ called again            │
+                    │ (per-session reinit)    │
+                    └─────────────────────────┘
+```
+
+### Duplicate Detection
+
+```mermaid
+sequenceDiagram
+    participant Scene
+    participant A as Singleton A (First)
+    participant B as Singleton A' (Duplicate)
+
+    Scene->>A: Awake()
+    A->>A: Register as Instance
+    Note over A: Instance = this
+
+    Scene->>B: Awake()
+    B->>A: Check existing Instance
+    A-->>B: Already exists
+    B->>B: Destroy self
+    Note over B: Log warning
+    destroy B
+```
+
+### Error Handling Flow
+
+```mermaid
+flowchart TD
+    A[Validation Check] --> B{Type Match?}
+    B -->|No| C{DEV/EDITOR?}
+    B -->|Yes| D{Active State?}
+    D -->|No| C
+    D -->|Yes| E{Not Destroyed?}
+    E -->|No| C
+    E -->|Yes| F[✓ Return Instance]
+
+    C -->|Yes| G[🚫 Throw Exception<br/>Fail-fast for debugging]
+    C -->|No| H[Return null/false<br/>Caller must handle]
+
+    style F fill:#90EE90
+    style G fill:#FFB6C1
+    style H fill:#FFE4B5
+```
 
 ## Directory Structure
 
