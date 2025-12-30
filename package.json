@@ -1,13 +1,12 @@
 {
     "name": "unity-policy-singleton",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "displayName": "Policy-Driven Singleton",
     "description": "A policy-driven singleton base class for MonoBehaviour with Domain Reload support.",
     "unity": "2022.3",
     "keywords": [
         "singleton",
-        "monobehaviour",
-        "pattern",
+        "policy",
         "domain-reload"
     ],
     "author": {

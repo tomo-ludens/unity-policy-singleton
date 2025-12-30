@@ -1,4 +1,4 @@
-# Policy-Driven Unity Singleton (v3.0.0)
+# Policy-Driven Unity Singleton (v3.0.1)
 
 [Japanese README](./README.ja.md)
 
@@ -140,7 +140,7 @@ public sealed class GameManager : GlobalSingleton<GameManager>
         // Called at the start of each play session (Play Mode start or restart with Domain Reload disabled)
         // Awake is called only on first run, but OnPlaySessionStart is called every play session
         Debug.Log($"New play session started. Current level: {CurrentLevel}");
-        
+
         // Reset session-specific state
         // Example: temporary data, event subscriptions, caches, etc.
         ResetTemporaryData();

@@ -1,4 +1,4 @@
-# ポリシー駆動型Unityシングルトン（v3.0.0）
+# ポリシー駆動型Unityシングルトン（v3.0.1）
 
 [English README](./README.md)
 
@@ -140,7 +140,7 @@ public sealed class GameManager : GlobalSingleton<GameManager>
         // Playセッション開始時（Play Mode開始時やDomain Reload無効での再開時）に呼ばれる
         // Awakeは初回のみだが、OnPlaySessionStartはPlayセッションごとに呼ばれる
         Debug.Log($"New play session started. Current level: {CurrentLevel}");
-        
+
         // セッションごとの状態をリセット
         // 例: 一時的なデータ、イベント購読、キャッシュなど
         ResetTemporaryData();
