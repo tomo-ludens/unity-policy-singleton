@@ -14,17 +14,13 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 - [アーキテクチャ](#architecture--アーキテクチャ)
   - [コンポーネント概要](#コンポーネント概要)
   - [ポリシー比較](#ポリシー比較)
-  - [Instance アクセスフロー](#instance-アクセスフロー)
-  - [シングルトンライフサイクル](#シングルトンライフサイクル)
   - [Domain Reload 無効時: Play セッション境界](#domain-reload-無効時-play-セッション境界)
-  - [重複検出](#重複検出)
-  - [エラーハンドリングフロー](#エラーハンドリングフロー)
 - [ディレクトリ構成](#directory-structure--ディレクトリ構成)
 - [前提としている Unity API の挙動](#dependencies--前提としている-unity-api-の挙動)
 - [インストール](#installation--インストール)
 - [使い方](#usage--使い方)
   - [GlobalSingleton](#1-globalsingleton)
-  - [SceneSingleton](#2-scenesingleton（sceneスコープのシングルトン）)
+  - [SceneSingleton](#2-scenesingleton)
   - [Instance と TryGetInstance の使い分け](#3-instance-と-trygetinstance-の使い分け典型例)
   - [キャッシュの推奨](#4-キャッシュの推奨重要)
 - [Public API Details](#public-api-details)
@@ -32,7 +28,7 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 - [制約と推奨事項](#constraints--best-practices--制約と推奨事項)
 - [Advanced Topics](#advanced-topics)
 - [Edit Mode の挙動](#edit-mode-の挙動詳細)
-- [IDE Configuration](#ide-configurationrider--resharper)
+- [IDE Configuration](#ide-configuration-rider--resharper)
 - [テスト](#testing--テスト)
 - [既知の制限事項](#known-limitations--既知の制限事項)
 - [トラブルシューティング](#troubleshooting--トラブルシューティング)
@@ -75,6 +71,11 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
   * **再初期化 (Soft Reset)**: 状態リセットは **Play セッション境界**で行い、Play ごとに再初期化を実行します（方針は `PlaySessionId` に寄せています）。
 * **厳密な型チェック**: ジェネリック型 `T` と実体型が一致しない参照は拒否し、誤用を防ぎます。
 * **開発時の安全性 (DEV/EDITOR)**:
+
+終了処理に関する注記（重要）:
+- Unity の終了処理（`Application.quitting`）や Editor の Play Mode 終了通知は、Unity バージョンや実行環境（Editor / Player）によって発火順やタイミングが揺れることがあります。
+- 本ライブラリは終了シーケンスを完全に制御することは目指さず、`IsQuitting` を **ベストエフォートのガード**として扱い、終了中のアクセス抑制と「終了中の復活（resurrection）」の回避を行います。
+
   * `FindAnyObjectByType(...Exclude)` が **非アクティブを見ない**ため、非アクティブなシングルトンが存在すると「見つからない扱い → 自動生成 → 隠れ重複」になり得ます。これを避けるため、DEV/EDITOR では非アクティブ検出時に **fail-fast（例外）** にします。
   * SceneSingleton をシーンに置き忘れた状態でアクセスした場合も、DEV/EDITOR では **fail-fast（例外）** にします。
 * **リリースビルド最適化**: ログや例外チェックはストリップされ、エラー時は `null` / `false` を返す設計です（利用側はハンドリングが必要です）。
@@ -89,18 +90,19 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 │  ┌───────────────────────────┐    ┌───────────────────────────────┐ │
 │  │    GlobalSingleton<T>     │    │      SceneSingleton<T>        │ │
 │  │    (PersistentPolicy)     │    │     (SceneScopedPolicy)       │ │
-│  │  • DontDestroyOnLoad      │    │  • シーンライフサイクルに従う │ │
-│  │  • 未検出時に自動生成     │    │  • 自動生成なし               │ │
+│  │  • DontDestroyOnLoad      │    │  • Scene lifecycle bound      │ │
+│  │  • Auto-create if missing │    │  • No auto-create             │ │
 │  └─────────────┬─────────────┘    └───────────────┬───────────────┘ │
 └────────────────┼──────────────────────────────────┼─────────────────┘
-                 │           継承                   │
+                 │                                  │
                  └──────────────┬───────────────────┘
+                                │ 継承
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                 SingletonBehaviour<T, TPolicy>                      │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌────────────────────────┐ │
-│  │    Instance     │ │  TryGetInstance │ │  ライフサイクルフック  │ │
-│  │   （自動生成）  │ │ （安全なアクセス）│ │  OnPlaySessionStart()  │ │
+│  │    Instance     │ │  TryGetInstance │ │   Lifecycle Hooks      │ │
+│  │  (auto-create)  │ │  (safe access)  │ │  OnPlaySessionStart()  │ │
 │  └─────────────────┘ └─────────────────┘ └────────────────────────┘ │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │ 使用
@@ -109,17 +111,21 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐
 │ SingletonRuntime│  │ ISingletonPolicy│  │    SingletonLogger      │
 │ • PlaySessionId │  │ • PersistAcross │  │ • Log/Warn/Error        │
-│ • IsQuitting    │  │   Scenes        │  │ • 条件付きコンパイル    │
-│ • スレッド検証  │  │ • AutoCreateIf  │  │ • リリースで除去        │
+│ • IsQuitting    │  │   Scenes        │  │ • Conditional compile   │
+│ • Thread check  │  │ • AutoCreateIf  │  │ • Stripped in release   │
 │                 │  │   Missing       │  │                         │
 └────────┬────────┘  └─────────────────┘  └─────────────────────────┘
-         │ エディタフック
+         │ Editorフック
          ▼
 ┌─────────────────────┐
 │SingletonEditorHooks │
-│ (Play Modeイベント) │
+│ (Play Mode events)  │
 └─────────────────────┘
 ```
+
+ Notes:
+ - **エディターフックの向き**: `SingletonEditorHooks`（Editorのみ）が `SingletonRuntime.NotifyQuitting()` を呼びます（Runtime 側が Editor Hooks に依存するわけではありません）。
+ - **名前空間/ビルド対象**: `SingletonEditorHooks` は `Singletons.Core.Editor` 配下で、Editor ビルド時のみコンパイルされます。
 
 ### ポリシー比較
 
@@ -131,10 +137,12 @@ classDiagram
         +bool AutoCreateIfMissing
     }
     class PersistentPolicy {
+        <<struct>>
         +PersistAcrossScenes = true
         +AutoCreateIfMissing = true
     }
     class SceneScopedPolicy {
+        <<struct>>
         +PersistAcrossScenes = false
         +AutoCreateIfMissing = false
     }
@@ -142,46 +150,8 @@ classDiagram
     ISingletonPolicy <|.. SceneScopedPolicy
 ```
 
-### Instance アクセスフロー
-
-```mermaid
-flowchart TD
-    A[Instance アクセス] --> B{IsQuitting?}
-    B -->|Yes| C[null を返す]
-    C --> C1[DEV でログ出力]
-    B -->|No| D{キャッシュ有効?<br/>PlaySessionId 一致}
-    D -->|Yes| E[キャッシュを返す]
-    D -->|No| F[FindAnyObjectByType]
-    F --> G{見つかった?}
-    G -->|Yes| H[インスタンス検証]
-    G -->|No| I{AutoCreate<br/>ポリシー?}
-    I -->|Yes| J[新規インスタンス生成]
-    I -->|No| K{DEV/EDITOR?}
-    K -->|Yes| L[例外をスロー]
-    K -->|No| M[null を返す]
-    J --> H
-    H --> N{有効?}
-    N -->|Yes| O[キャッシュして返す]
-    N -->|No| K
-```
-
-### シングルトンライフサイクル
-
-```mermaid
-stateDiagram-v2
-    [*] --> 未生成
-    未生成 --> アクティブ : Instance アクセス（AutoCreate）<br/>または シーンロード（配置済み）
-    アクティブ --> アクティブ : 新 Play セッション<br/>（OnPlaySessionStart）
-    アクティブ --> 破棄済み : OnDestroy()
-    破棄済み --> アクティブ : 再アクセス（AutoCreate）
-    破棄済み --> [*] : アプリケーション終了
-
-    state アクティブ {
-        [*] --> 初期化済み
-        初期化済み --> セッションリセット : PlaySessionId 変更
-        セッションリセット --> 初期化済み : OnPlaySessionStart()
-    }
-```
+ Notes:
+ - ポリシー実装は `readonly struct` で、プロパティは常に一定値を返す設計です（`default(TPolicy)` でゼロアロケーション）。
 
 ### Domain Reload 無効時: Play セッション境界
 
@@ -191,60 +161,24 @@ stateDiagram-v2
                                                                     time
     ┌─────────────────────┐              ┌─────────────────────┐
     │  PlaySessionId: 1   │              │  PlaySessionId: 2   │
+    │  _instance: 0xABC   │              │  _instance: 0xABC   │ (same object)
     └─────────────────────┘              └─────────────────────┘
               │                                    │
     ┌─────────▼─────────┐              ┌─────────▼─────────┐
-    │ 静的キャッシュ OK │              │ 静的キャッシュ OK │
-    │ Instance: 0xABC   │   ───────▶   │ Instance: 0xABC   │（同一オブジェクト）
-    └───────────────────┘   無効化     └───────────────────┘
-                            & 更新
+    │ Static cache OK   │              │ Static cache OK   │
+    │ Instance: 0xABC   │   ───────▶   │ Instance: 0xABC   │ (same object)
+    └───────────────────┘   Invalidate └───────────────────┘
+                            & Refresh
                                  │
                     ┌────────────▼────────────┐
                     │ OnPlaySessionStart()    │
-                    │ 再度呼び出し            │
-                    │（セッション毎の再初期化）│
+                    │ called again            │
+                    │ (per-session reinit)    │
                     └─────────────────────────┘
 ```
 
-### 重複検出
-
-```mermaid
-sequenceDiagram
-    participant Scene as シーン
-    participant A as Singleton A（最初）
-    participant B as Singleton A'（重複）
-
-    Scene->>A: Awake()
-    A->>A: Instance として登録
-    Note over A: Instance = this
-
-    Scene->>B: Awake()
-    B->>A: 既存 Instance を確認
-    A-->>B: 既に存在
-    B->>B: 自身を破棄
-    Note over B: 警告ログ出力
-    destroy B
-```
-
-### エラーハンドリングフロー
-
-```mermaid
-flowchart TD
-    A[検証チェック] --> B{型一致?}
-    B -->|No| C{DEV/EDITOR?}
-    B -->|Yes| D{アクティブ状態?}
-    D -->|No| C
-    D -->|Yes| E{破棄されていない?}
-    E -->|No| C
-    E -->|Yes| F[✓ Instance を返す]
-
-    C -->|Yes| G[🚫 例外をスロー<br/>デバッグ用 fail-fast]
-    C -->|No| H[null/false を返す<br/>呼び出し側でハンドリング]
-
-    style F fill:#90EE90
-    style G fill:#FFB6C1
-    style H fill:#FFE4B5
-```
+ Notes:
+ - `PlaySessionId` が変化すると static キャッシュ（`_instance`）は無効化されます。シーン上のオブジェクトが残っている場合は、再探索で同一インスタンスを掴み直します。
 
 ## Directory Structure / ディレクトリ構成
 
@@ -503,6 +437,17 @@ Domain Reload を無効化すると、Play のたびに「static が初期状態
 また、Unity では **ジェネリック型に付けた `RuntimeInitializeOnLoadMethod` が期待どおり呼ばれない**問題が報告されています（Issue Tracker）。そのため、初期化は非ジェネリック側（`SingletonRuntime`）へ集約します。
 
 ## Constraints & Best Practices / 制約と推奨事項
+
+### 0. 意図的な制約（設計上の契約）
+
+本ライブラリは、Unity で起きやすい「隠れ重複」「終了中の復活」「初期化順の密結合」といったデバッグ困難な問題を減らすため、意図的に制約を設けています。DEV/EDITOR ビルドでは、誤用を早期発見するために一部が fail-fast（例外）になります。
+
+* **メインスレッド限定（Play 中）**: `Instance` / `TryGetInstance` は Play 中はメインスレッドから呼び出す前提です。
+* **厳密な型一致**: 実体型が `T` と完全一致しない参照は拒否します（派生型などは受け付けません）。
+* **非アクティブ/Disabled を避ける**: Unity の検索APIの仕様上、非アクティブ/Disabled は「見つからない扱い」になり得るため、DEV/EDITOR では隠れ重複防止のため例外にします。
+* **SceneSingleton はシーン配置必須**: Scene スコープは自動生成しません。置き忘れは DEV/EDITOR で例外、Player では `null` です。
+* **終了処理中**: 終了中は `null` / `false` を返し、復活防止のためアクセスを抑制します（ベストエフォート）。
+* **リリースでの `null` / `false`**: DEV/EDITOR の例外・ログはストリップされるため、利用側で `null` / `false` をハンドリングしてください。
 
 ### 1. 具象クラスは `sealed` を推奨します
 
