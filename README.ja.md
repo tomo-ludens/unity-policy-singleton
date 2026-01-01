@@ -699,6 +699,10 @@ DefaultExecutionOrder（Scripting API）
 Unity Issue Tracker: RuntimeInitializeOnLoadMethodAttribute not invoked if class is generic
 [https://issuetracker.unity3d.com/issues/runtimeinitializeonloadmethodattribute-not-invoked-if-class-is-generic](https://issuetracker.unity3d.com/issues/runtimeinitializeonloadmethodattribute-not-invoked-if-class-is-generic)
 
-## License
+## 変更履歴
 
-See [LICENSE](./LICENSE).
+[CHANGELOG.md](./CHANGELOG.md) ファイルをご確認ください。
+
+## ライセンス
+
+[LICENSE](./LICENSE) ファイルをご確認ください。
