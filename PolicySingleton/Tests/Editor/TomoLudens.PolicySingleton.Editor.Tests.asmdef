@@ -1,7 +1,8 @@
 {
-    "name": "Singletons.Editor.Tests",
+    "name": "TomoLudens.PolicySingleton.Editor.Tests",
+    "rootNamespace": "TomoLudens",
     "references": [
-        "Singletons"
+        "TomoLudens.PolicySingleton"
     ],
     "includePlatforms": [
         "Editor"

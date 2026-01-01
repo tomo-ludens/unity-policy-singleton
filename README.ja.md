@@ -1,4 +1,4 @@
-# ポリシー駆動型Unityシングルトン（v3.1.0）
+# ポリシー駆動型Unityシングルトン（v1.0.0）
 
 [English README](./README.md)
 
@@ -125,7 +125,7 @@ MonoBehaviour 向けの **ポリシー駆動型シングルトン基底クラス
 
  Notes:
  - **エディターフックの向き**: `SingletonEditorHooks`（Editorのみ）が `SingletonRuntime.NotifyQuitting()` を呼びます（Runtime 側が Editor Hooks に依存するわけではありません）。
- - **名前空間/ビルド対象**: `SingletonEditorHooks` は `Singletons.Core.Editor` 配下で、Editor ビルド時のみコンパイルされます。
+- **名前空間/ビルド対象**: `SingletonEditorHooks` は `TomoLudens.PolicySingleton.Editor` 配下で、Editor ビルド時のみコンパイルされます。
 
 ### ポリシー比較
 
@@ -183,29 +183,30 @@ classDiagram
 ## Directory Structure / ディレクトリ構成
 
 ```text
-Singletons/
-├── Singletons.asmdef                       # Assembly Definition
-├── AssemblyInfo.cs                         # InternalsVisibleTo（テスト用）
-├── GlobalSingleton.cs                      # Public API（永続・自動生成あり）
-├── SceneSingleton.cs                       # Public API（シーン限定・自動生成なし）
+PolicySingleton/
 ├── Core/
-│   ├── SingletonBehaviour.cs               # コア実装
-│   ├── SingletonRuntime.cs                 # 内部ランタイム（Domain Reload対策）
-│   ├── SingletonLogger.cs                  # 条件付きロガー（リリースで除去）
-│   └── Editor/
-│       └── SingletonEditorHooks.cs         # Editorイベントフック（Play Mode状態）
+│   ├── AssemblyInfo.cs                                  # InternalsVisibleTo（テスト用）
+│   ├── SingletonBehaviour.cs                            # コア実装
+│   ├── SingletonRuntime.cs                              # 内部ランタイム（Domain Reload対策）
+│   └── SingletonLogger.cs                               # 条件付きロガー（リリースで除去）
+├── Editor/
+│   ├── SingletonEditorHooks.cs                          # Editorイベントフック（Play Mode状態）
+│   └── TomoLudens.PolicySingleton.Editor.asmdef         # Editor用アセンブリ定義
 ├── Policy/
-│   ├── ISingletonPolicy.cs                 # ポリシーインターフェース
-│   ├── PersistentPolicy.cs                 # 永続ポリシーの実装
-│   └── SceneScopedPolicy.cs                # シーンスコープポリシーの実装
-└── Tests/                                  # PlayMode & EditMode テスト
-    ├── TestExtensions.cs                   # テストヘルパー
-    ├── Editor/
-    │   ├── Singletons.Editor.Tests.asmdef  # Editor用アセンブリ定義
-    │   └── EditModeTests.cs                # EditModeテスト
-    └── Runtime/
-        ├── Singletons.Tests.asmdef         # Runtime用アセンブリ定義
-        └── SingletonTests.cs               # PlayModeテスト
+│   ├── ISingletonPolicy.cs                              # ポリシーインターフェース
+│   ├── PersistentPolicy.cs                              # 永続ポリシーの実装
+│   └── SceneScopedPolicy.cs                             # シーンスコープポリシーの実装
+├── Tests/                                               # PlayMode & EditMode テスト
+│   ├── Editor/
+│   │   ├── PolicySingletonEditorTests.cs                # EditModeテスト
+│   │   └── TomoLudens.PolicySingleton.Editor.Tests.asmdef # Editorテスト用アセンブリ定義
+│   ├── Runtime/
+│   │   ├── PolicySingletonRuntimeTests.cs               # PlayModeテスト
+│   │   └── TomoLudens.PolicySingleton.Tests.asmdef      # Runtimeテスト用アセンブリ定義
+│   └── TestExtensions.cs                                # テスト用拡張メソッド
+├── GlobalSingleton.cs                                   # Public API（永続・自動生成あり）
+├── SceneSingleton.cs                                    # Public API（シーン限定・自動生成なし）
+└── TomoLudens.PolicySingleton.asmdef                    # Assembly Definition
 ```
 
 ## Dependencies / 前提としている Unity API の挙動
@@ -221,7 +222,7 @@ Singletons/
 
 ## Installation / インストール
 
-1. プロジェクトの任意の場所（例: `Assets/Plugins/Singletons/`）に `Singletons` フォルダを配置してください。
+1. プロジェクトの任意の場所（例: `Assets/Plugins/PolicySingleton/`）に `PolicySingleton` フォルダを配置してください。
 2. 必要に応じて名前空間やアセンブリ定義（Assembly Definition）を調整してください。
 
 ## Usage / 使い方
@@ -231,7 +232,7 @@ Singletons/
 シーンを跨いで生存し、アクセス時に見つからなければ自動生成します。
 
 ```csharp
-using Singletons;
+using TomoLudens.PolicySingleton;
 
 // 継承禁止 (sealed) を推奨します
 public sealed class GameManager : GlobalSingleton<GameManager>
@@ -299,7 +300,7 @@ public sealed class GameManager : GlobalSingleton<GameManager>
 Scene 上に配置して使用します。配置する必要があります。自動生成は行わず、一つのSceneに内で生存し、Scene アンロードと共に破棄されます。
 
 ```csharp
-using Singletons;
+using TomoLudens.PolicySingleton;
 
 public sealed class LevelController : SceneSingleton<LevelController>
 {

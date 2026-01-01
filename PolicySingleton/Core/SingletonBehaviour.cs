@@ -1,7 +1,7 @@
-using Singletons.Policy;
+using TomoLudens.PolicySingleton.Policy;
 using UnityEngine;
 
-namespace Singletons.Core
+namespace TomoLudens.PolicySingleton.Core
 {
     /// <summary>
     /// Policy-driven singleton base class for <see cref="MonoBehaviour"/>.

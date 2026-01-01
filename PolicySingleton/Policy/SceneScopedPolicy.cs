@@ -1,4 +1,4 @@
-namespace Singletons.Policy
+namespace TomoLudens.PolicySingleton.Policy
 {
     /// <summary>
     /// Policy for scene-local singletons: no persistence, no auto-creation.

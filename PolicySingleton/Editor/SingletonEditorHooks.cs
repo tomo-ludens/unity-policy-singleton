@@ -1,6 +1,7 @@
+using TomoLudens.PolicySingleton.Core;
 using UnityEditor;
 
-namespace Singletons.Core.Editor
+namespace TomoLudens.PolicySingleton.Editor
 {
     /// <summary>
     /// Registers Editor event hooks for singleton infrastructure.

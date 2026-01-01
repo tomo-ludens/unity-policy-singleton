@@ -1,10 +1,163 @@
+#if UNITY_EDITOR || DEVELOPMENT_BUILD || UNITY_ASSERTIONS
+#define TEST_IS_DEV
+#endif
+
+using System;
 using System.Collections;
+using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace Singletons.Tests.Runtime
+namespace TomoLudens.PolicySingleton.Tests.Runtime
 {
+    internal static class TestBuildGuards
+    {
+#if TEST_IS_DEV
+        public const bool IsDev = true;
+#else
+        public const bool IsDev = false;
+#endif
+    }
+
+    /// <summary>
+    /// Cumulative counter for observing logs by type and count during test execution.
+    /// Holds the cumulative value at scope start to verify increments via delta comparison.
+    /// </summary>
+    internal static class TestLogCounter
+    {
+        private static int _sLog;
+        private static int _sWarning;
+        private static int _sError;
+        private static int _sAssert;
+        private static int _sException;
+
+        private static bool _sInstalled;
+
+        public readonly struct Snapshot
+        {
+            public readonly int Log;
+            public readonly int Warning;
+            public readonly int Error;
+            public readonly int Assert;
+            public readonly int Exception;
+
+            public Snapshot(int log, int warning, int error, int assert, int exception)
+            {
+                Log = log;
+                Warning = warning;
+                Error = error;
+                Assert = assert;
+                Exception = exception;
+            }
+
+            public Snapshot Delta(Snapshot baseline)
+            {
+                return new Snapshot(
+                    log: Log - baseline.Log,
+                    warning: Warning - baseline.Warning,
+                    error: Error - baseline.Error,
+                    assert: Assert - baseline.Assert,
+                    exception: Exception - baseline.Exception
+                );
+            }
+        }
+
+        public static void Install()
+        {
+            if (_sInstalled)
+            {
+                return;
+            }
+
+            _sInstalled = true;
+            Application.logMessageReceivedThreaded += OnLogMessageReceivedThreaded;
+        }
+
+        public static void Uninstall()
+        {
+            if (!_sInstalled)
+            {
+                return;
+            }
+
+            _sInstalled = false;
+            Application.logMessageReceivedThreaded -= OnLogMessageReceivedThreaded;
+        }
+
+        public static Snapshot Take()
+        {
+            return new Snapshot(
+                log: Volatile.Read(location: ref _sLog),
+                warning: Volatile.Read(location: ref _sWarning),
+                error: Volatile.Read(location: ref _sError),
+                assert: Volatile.Read(location: ref _sAssert),
+                exception: Volatile.Read(location: ref _sException)
+            );
+        }
+
+        private static void OnLogMessageReceivedThreaded(string condition, string stackTrace, LogType type)
+        {
+            switch (type)
+            {
+                case LogType.Error:
+                    Interlocked.Increment(location: ref _sError);
+                    return;
+                case LogType.Assert:
+                    Interlocked.Increment(location: ref _sAssert);
+                    return;
+                case LogType.Exception:
+                    Interlocked.Increment(location: ref _sException);
+                    return;
+                case LogType.Warning:
+                    Interlocked.Increment(location: ref _sWarning);
+                    return;
+                case LogType.Log:
+                default:
+                    Interlocked.Increment(location: ref _sLog);
+                    return;
+            }
+        }
+    }
+
+#if TEST_IS_DEV
+    /// <summary>
+    /// Scope that locally suppresses expected Error/Exception logs from causing
+    /// test failures due to "Unexpected log" detection.
+    /// </summary>
+    internal readonly struct IgnoreFailingMessagesScope : IDisposable
+    {
+        private readonly bool _previous;
+
+        public IgnoreFailingMessagesScope(bool enabled)
+        {
+            _previous = LogAssert.ignoreFailingMessages;
+            LogAssert.ignoreFailingMessages = enabled;
+        }
+
+        public void Dispose()
+        {
+            LogAssert.ignoreFailingMessages = _previous;
+        }
+    }
+#endif
+
+    [SetUpFixture]
+    public sealed class PolicySingletonTestSetup
+    {
+        [OneTimeSetUp]
+        public void OneTimeSetUp()
+        {
+            TestLogCounter.Install();
+        }
+
+        [OneTimeTearDown]
+        public void OneTimeTearDown()
+        {
+            TestLogCounter.Uninstall();
+        }
+    }
+
     public sealed class TestPersistentSingleton : GlobalSingleton<TestPersistentSingleton>
     {
         public int AwakeCount { get; private set; }
@@ -44,21 +197,90 @@ namespace Singletons.Tests.Runtime
 
     public sealed class TestSoftResetSingleton : GlobalSingleton<TestSoftResetSingleton>
     {
-        private int _awakeCalls;
-        private int _playSessionStartCalls;
+        public int AwakeCalls { get; private set; }
 
-        public int AwakeCalls => _awakeCalls;
-        public int PlaySessionStartCalls => _playSessionStartCalls;
+        public int PlaySessionStartCalls { get; private set; }
 
         protected override void Awake()
         {
             base.Awake();
-            _awakeCalls++;
+            AwakeCalls++;
         }
 
         protected override void OnPlaySessionStart()
         {
-            _playSessionStartCalls++;
+            PlaySessionStartCalls++;
+        }
+    }
+
+    public sealed class TestSingletonWithoutBaseAwake : GlobalSingleton<TestSingletonWithoutBaseAwake>
+    {
+        public bool AwakeWasCalled { get; private set; }
+
+        protected override void Awake()
+        {
+            AwakeWasCalled = true;
+        }
+    }
+
+    public sealed class GameManager : GlobalSingleton<GameManager>
+    {
+        public int PlayerScore { get; private set; }
+        public string CurrentLevel { get; private set; }
+        public bool IsGamePaused { get; private set; }
+
+        protected override void Awake()
+        {
+            base.Awake();
+            PlayerScore = 0;
+            CurrentLevel = "MainMenu";
+            IsGamePaused = false;
+        }
+
+        public void AddScore(int points)
+        {
+            PlayerScore += points;
+        }
+
+        public void SetLevel(string levelName)
+        {
+            CurrentLevel = levelName;
+        }
+
+        public void PauseGame()
+        {
+            IsGamePaused = true;
+        }
+
+        public void ResumeGame()
+        {
+            IsGamePaused = false;
+        }
+    }
+
+    public sealed class LevelController : SceneSingleton<LevelController>
+    {
+        public string LevelName { get; private set; }
+        public int EnemyCount { get; private set; }
+        public bool IsLevelComplete { get; private set; }
+
+        protected override void Awake()
+        {
+            base.Awake();
+            LevelName = "DefaultLevel";
+            EnemyCount = 5;
+            IsLevelComplete = false;
+        }
+
+        public void SetLevelInfo(string levelName, int enemies)
+        {
+            LevelName = levelName;
+            EnemyCount = enemies;
+        }
+
+        public void CompleteLevel()
+        {
+            IsLevelComplete = true;
         }
     }
 
@@ -70,7 +292,7 @@ namespace Singletons.Tests.Runtime
         {
             if (TestPersistentSingleton.TryGetInstance(instance: out var instance))
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
 
             default(TestPersistentSingleton).ResetStaticCacheForTesting();
@@ -132,8 +354,6 @@ namespace Singletons.Tests.Runtime
             Assert.IsFalse(condition: exists, message: "TryGetInstance should not auto-create");
         }
 
-
-
         [UnityTest]
         public IEnumerator Duplicate_IsDestroyed()
         {
@@ -145,9 +365,12 @@ namespace Singletons.Tests.Runtime
             yield return null;
 
             Assert.AreSame(expected: first, actual: TestPersistentSingleton.Instance, message: "Original instance should remain");
-            Assert.AreEqual(expected: 1, actual: Object.FindObjectsByType<TestPersistentSingleton>(sortMode: FindObjectsSortMode.None).Length, message: "Only one instance should exist");
+            Assert.AreEqual(
+                expected: 1,
+                actual: UnityEngine.Object.FindObjectsByType<TestPersistentSingleton>(sortMode: FindObjectsSortMode.None).Length,
+                message: "Only one instance should exist"
+            );
         }
-
 
         [UnityTest]
         public IEnumerator Instance_HasDontDestroyOnLoad()
@@ -158,10 +381,11 @@ namespace Singletons.Tests.Runtime
             Assert.IsTrue(
                 condition: instance.gameObject.scene.name == "DontDestroyOnLoad" || instance.gameObject.scene.buildIndex == -1,
                 message: "Persistent singleton should be in DontDestroyOnLoad scene"
-                );
+            );
         }
     }
 
+    [TestFixture]
     public class SoftResetTests
     {
         [TearDown]
@@ -169,7 +393,7 @@ namespace Singletons.Tests.Runtime
         {
             if (TestSoftResetSingleton.TryGetInstance(instance: out var instance))
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
 
             default(TestSoftResetSingleton).ResetStaticCacheForTesting();
@@ -185,7 +409,6 @@ namespace Singletons.Tests.Runtime
             Assert.AreEqual(expected: 1, actual: instance.AwakeCalls, message: "Awake should run once per GameObject lifetime");
             Assert.AreEqual(expected: 1, actual: instance.PlaySessionStartCalls, message: "OnPlaySessionStart should run on first establishment");
 
-            // Simulate new Play session boundary (Domain Reload disabled scenario)
             TestExtensions.AdvancePlaySessionIdForTesting();
 
             var sameInstance = TestSoftResetSingleton.Instance;
@@ -196,7 +419,7 @@ namespace Singletons.Tests.Runtime
             Assert.AreEqual(expected: 2, actual: sameInstance.PlaySessionStartCalls, message: "OnPlaySessionStart should run once per Play session");
             Assert.AreEqual(
                 expected: 1,
-                actual: Object.FindObjectsByType<TestSoftResetSingleton>(sortMode: FindObjectsSortMode.None).Length,
+                actual: UnityEngine.Object.FindObjectsByType<TestSoftResetSingleton>(sortMode: FindObjectsSortMode.None).Length,
                 message: "Only one instance should exist"
             );
         }
@@ -210,7 +433,7 @@ namespace Singletons.Tests.Runtime
         {
             if (TestSceneSingleton.TryGetInstance(instance: out var instance))
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
 
             default(TestSceneSingleton).ResetStaticCacheForTesting();
@@ -276,10 +499,13 @@ namespace Singletons.Tests.Runtime
             yield return null;
 
             Assert.AreSame(expected: first, actual: TestSceneSingleton.Instance, message: "First instance should remain");
-            Assert.AreEqual(expected: 1, actual: Object.FindObjectsByType<TestSceneSingleton>(sortMode: FindObjectsSortMode.None).Length, message: "Only one instance should exist");
+            Assert.AreEqual(
+                expected: 1,
+                actual: UnityEngine.Object.FindObjectsByType<TestSceneSingleton>(sortMode: FindObjectsSortMode.None).Length,
+                message: "Only one instance should exist"
+            );
         }
     }
-
 
     [TestFixture]
     public class InactiveInstanceTests
@@ -287,37 +513,38 @@ namespace Singletons.Tests.Runtime
         [TearDown]
         public void TearDown()
         {
-            var allInstances = Object.FindObjectsByType<TestInactiveSingleton>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            var allInstances = UnityEngine.Object.FindObjectsByType<TestInactiveSingleton>(
+                findObjectsInactive: FindObjectsInactive.Include,
+                sortMode: FindObjectsSortMode.None
+            );
 
             foreach (var instance in allInstances)
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
 
             default(TestInactiveSingleton).ResetStaticCacheForTesting();
         }
 
         [UnityTest]
-        public IEnumerator Instance_ThrowsInEditor_WhenInactiveInstanceExists()
+        public IEnumerator Instance_ThrowsInDev_WhenInactiveInstanceExists()
         {
-            // Create GO, add component (Awake runs but doesn't cache yet), then set inactive
             var go = new GameObject(name: "InactiveSingleton");
             go.AddComponent<TestInactiveSingleton>();
             go.SetActive(value: false);
 
-            // Reset cache to force fresh search
             default(TestInactiveSingleton).ResetStaticCacheForTesting();
             yield return null;
 
-            // Singleton behavior: ThrowIfInactiveInstanceExists() checks with Include
-            // and BLOCKS auto-creation if inactive instance exists (fail-fast for devs)
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Assert.Throws<System.InvalidOperationException>(() => { _ = TestInactiveSingleton.Instance; }, message: "Should throw when inactive instance exists - auto-create blocked");
-            #else
-            // In release build, ThrowIfInactiveInstanceExists is stripped (Conditional attribute)
+#if TEST_IS_DEV
+            Assert.Throws<InvalidOperationException>(
+                code: () => { _ = TestInactiveSingleton.Instance; },
+                message: "Should throw when inactive instance exists - auto-create blocked (dev-only)"
+            );
+#else
             var instance = TestInactiveSingleton.Instance;
-            Assert.IsNotNull(instance, "Should auto-create in release build");
-            #endif
+            Assert.IsNotNull(anObject: instance, message: "Should auto-create in non-dev build");
+#endif
         }
 
         [UnityTest]
@@ -327,11 +554,9 @@ namespace Singletons.Tests.Runtime
             go.AddComponent<TestInactiveSingleton>();
             go.SetActive(value: false);
 
-            // Reset cache to force fresh search
             default(TestInactiveSingleton).ResetStaticCacheForTesting();
             yield return null;
 
-            // With Exclude policy, inactive GO is not found
             bool result = TestInactiveSingleton.TryGetInstance(instance: out var instance);
 
             Assert.IsFalse(condition: result, message: "TryGetInstance should return false when only inactive exists");
@@ -339,24 +564,25 @@ namespace Singletons.Tests.Runtime
         }
 
         [UnityTest]
-        public IEnumerator DisabledComponent_ThrowsInEditor()
+        public IEnumerator DisabledComponent_ThrowsInDev()
         {
-            // Disabled component (enabled=false) but active GameObject IS found
             var go = new GameObject(name: "DisabledComponent");
             var comp = go.AddComponent<TestInactiveSingleton>();
-            yield return null; // Let Awake run first
+            yield return null;
 
-            // Disable the component after initialization
             comp.enabled = false;
             default(TestInactiveSingleton).ResetStaticCacheForTesting();
             yield return null;
 
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Assert.Throws<System.InvalidOperationException>(() => { _ = TestInactiveSingleton.Instance; }, message: "Should throw when component is disabled in DEV/EDITOR");
-            #else
+#if TEST_IS_DEV
+            Assert.Throws<InvalidOperationException>(
+                code: () => { _ = TestInactiveSingleton.Instance; },
+                message: "Should throw when component is disabled (dev-only)"
+            );
+#else
             var instance = TestInactiveSingleton.Instance;
-            Assert.IsNull(instance, "Should return null in release build");
-            #endif
+            Assert.IsNull(anObject: instance, message: "Should return null in non-dev build");
+#endif
         }
     }
 
@@ -366,11 +592,14 @@ namespace Singletons.Tests.Runtime
         [TearDown]
         public void TearDown()
         {
-            var baseInstances = Object.FindObjectsByType<TestBaseSingleton>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            var baseInstances = UnityEngine.Object.FindObjectsByType<TestBaseSingleton>(
+                findObjectsInactive: FindObjectsInactive.Include,
+                sortMode: FindObjectsSortMode.None
+            );
 
             foreach (var instance in baseInstances)
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
 
             default(TestBaseSingleton).ResetStaticCacheForTesting();
@@ -379,21 +608,37 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator DerivedClass_IsRejected_AndDestroyed()
         {
-            // Expect the error log BEFORE the action that triggers it
-            // Log format: "[TypeTag] Type mismatch..."
-            LogAssert.Expect(type: LogType.Error, message: new System.Text.RegularExpressions.Regex(pattern: @".*Type mismatch.*"));
+            var start = TestLogCounter.Take();
 
+#if TEST_IS_DEV
+            using (new IgnoreFailingMessagesScope(enabled: true))
+            {
+                var go = new GameObject(name: "DerivedSingleton");
+                go.AddComponent<TestDerivedSingleton>();
+                yield return null;
+            }
+
+            var deltaDev = TestLogCounter.Take().Delta(baseline: start);
+            Assert.AreEqual(expected: 1, actual: deltaDev.Error, message: "Type mismatch should emit exactly one error log (dev-only)");
+            Assert.AreEqual(expected: 0, actual: deltaDev.Exception, message: "No exceptions expected (dev-only)");
+            Assert.AreEqual(expected: 0, actual: deltaDev.Assert, message: "No asserts expected (dev-only)");
+#else
             var go = new GameObject(name: "DerivedSingleton");
-            go.AddComponent<TestDerivedSingleton>(); // Error logged in Awake
+            go.AddComponent<TestDerivedSingleton>();
             yield return null;
+#endif
 
-            // Access via base class - derived instance was rejected, so auto-create
             var instance = TestBaseSingleton.Instance;
             yield return null;
 
-            // The derived instance should be destroyed, and a new base instance auto-created
             Assert.IsNotNull(anObject: instance, message: "Should auto-create correct type");
             Assert.AreEqual(expected: typeof(TestBaseSingleton), actual: instance.GetType(), message: "Instance should be exact type, not derived");
+
+            var derivedInstances = UnityEngine.Object.FindObjectsByType<TestDerivedSingleton>(
+                findObjectsInactive: FindObjectsInactive.Include,
+                sortMode: FindObjectsSortMode.None
+            );
+            Assert.AreEqual(expected: 0, actual: derivedInstances.Length, message: "Derived singleton instance should be destroyed");
         }
 
         [UnityTest]
@@ -413,101 +658,114 @@ namespace Singletons.Tests.Runtime
     [TestFixture]
     public class ThreadSafetyTests
     {
+        private const float ThreadTimeoutSeconds = 60f;
+
         [TearDown]
         public void TearDown()
         {
             if (TestPersistentSingleton.TryGetInstance(instance: out var instance))
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
 
             default(TestPersistentSingleton).ResetStaticCacheForTesting();
         }
 
-        [UnityTest]
-        public IEnumerator BackgroundThread_Instance_ReturnsNull()
+        private static IEnumerator WaitForThread(Thread thread, string context)
         {
-            // First, ensure main thread ID is captured by accessing from main thread
-            _ = TestPersistentSingleton.Instance;
-            yield return null;
+            float start = Time.realtimeSinceStartup;
 
-            // Expect error log from ValidateMainThread
-            LogAssert.Expect(type: LogType.Error, message: new System.Text.RegularExpressions.Regex(pattern: "must be called from the main thread"));
-
-            // Background thread access should return null (not throw)
-            TestPersistentSingleton backgroundResult = null;
-            bool threadCompleted = false;
-
-            var thread = new System.Threading.Thread(() =>
+            while (thread.IsAlive)
             {
-                try
+                if (Time.realtimeSinceStartup - start > ThreadTimeoutSeconds)
                 {
-                    backgroundResult = TestPersistentSingleton.Instance;
+                    Assert.Fail(message: $"Timed out waiting for background thread: {context}");
                 }
-                finally
-                {
-                    threadCompleted = true;
-                }
-            });
 
-            thread.Start();
-
-            while (!threadCompleted)
-            {
                 yield return null;
             }
-
-            Assert.IsNull(anObject: backgroundResult, message: "Instance should return null from background thread");
         }
 
         [UnityTest]
-        public IEnumerator BackgroundThread_TryGetInstance_ReturnsFalse()
+        public IEnumerator BackgroundThread_Instance_ReturnsNull_And_LogsOnceInDev()
         {
+#if !TEST_IS_DEV
+            Assert.Ignore(message: "Thread-safety log verification is dev-only.");
+            yield break;
+#else
             _ = TestPersistentSingleton.Instance;
             yield return null;
 
-            // Expect error log from ValidateMainThread
-            LogAssert.Expect(type: LogType.Error, message: new System.Text.RegularExpressions.Regex(pattern: "must be called from the main thread"));
+            var start = TestLogCounter.Take();
+            TestPersistentSingleton backgroundResult = null;
+
+            using (new IgnoreFailingMessagesScope(enabled: true))
+            {
+                var thread = new Thread(start: () =>
+                {
+                    backgroundResult = TestPersistentSingleton.Instance;
+                });
+
+                thread.Start();
+                yield return WaitForThread(thread: thread, context: "BackgroundThread_Instance_ReturnsNull_And_LogsOnceInDev");
+            }
+
+            Assert.IsNull(anObject: backgroundResult, message: "Instance should return null from background thread");
+
+            var delta = TestLogCounter.Take().Delta(baseline: start);
+            Assert.AreEqual(expected: 1, actual: delta.Error, message: "Background thread Instance access should log exactly one error (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Exception, message: "No exceptions expected (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Assert, message: "No asserts expected (dev-only)");
+#endif
+        }
+
+        [UnityTest]
+        public IEnumerator BackgroundThread_TryGetInstance_ReturnsFalse_And_LogsOnceInDev()
+        {
+#if !TEST_IS_DEV
+            Assert.Ignore(message: "Thread-safety log verification is dev-only.");
+            yield break;
+#else
+            _ = TestPersistentSingleton.Instance;
+            yield return null;
+
+            var start = TestLogCounter.Take();
 
             bool tryGetResult = true;
             TestPersistentSingleton backgroundInstance = null;
-            bool threadCompleted = false;
 
-            var thread = new System.Threading.Thread(() =>
+            using (new IgnoreFailingMessagesScope(enabled: true))
             {
-                try
+                var thread = new Thread(start: () =>
                 {
                     tryGetResult = TestPersistentSingleton.TryGetInstance(instance: out backgroundInstance);
-                }
-                finally
-                {
-                    threadCompleted = true;
-                }
-            });
+                });
 
-            thread.Start();
-
-            while (!threadCompleted)
-            {
-                yield return null;
+                thread.Start();
+                yield return WaitForThread(thread: thread, context: "BackgroundThread_TryGetInstance_ReturnsFalse_And_LogsOnceInDev");
             }
 
             Assert.IsFalse(condition: tryGetResult, message: "TryGetInstance should return false from background thread");
             Assert.IsNull(anObject: backgroundInstance, message: "Instance should be null from background thread");
+
+            var delta = TestLogCounter.Take().Delta(baseline: start);
+            Assert.AreEqual(expected: 1, actual: delta.Error, message: "Background thread TryGetInstance should log exactly one error (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Exception, message: "No exceptions expected (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Assert, message: "No asserts expected (dev-only)");
+#endif
         }
 
         [UnityTest]
         public IEnumerator MainThread_Instance_AccessIsSafe()
         {
-            // Verify that main thread access works correctly and safely
-            System.Exception mainThreadException = null;
+            Exception mainThreadException = null;
             TestPersistentSingleton instance = null;
 
             try
             {
                 instance = TestPersistentSingleton.Instance;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 mainThreadException = ex;
             }
@@ -522,13 +780,9 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator MainThread_TryGetInstance_AccessIsSafe()
         {
-            // Verify TryGetInstance works safely on main thread
-
-            // First create an instance
             var createdInstance = TestPersistentSingleton.Instance;
             yield return null;
 
-            // Now TryGetInstance should find it safely on main thread
             bool result = TestPersistentSingleton.TryGetInstance(instance: out var instance);
 
             Assert.IsTrue(condition: result, message: "TryGetInstance should return true after creation");
@@ -541,13 +795,11 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator ThreadSafety_Isolation_BetweenOperations()
         {
-            // Test that main thread operations work correctly and are isolated from thread safety issues
             var firstInstance = TestPersistentSingleton.Instance;
             yield return null;
 
             Assert.IsNotNull(anObject: firstInstance, message: "Should create instance on main thread");
 
-            // Multiple Instance calls should be safe and return same instance
             for (int i = 0; i < 5; i++)
             {
                 var instance = TestPersistentSingleton.Instance;
@@ -555,60 +807,54 @@ namespace Singletons.Tests.Runtime
                 yield return null;
             }
 
-            // TryGetInstance should also work safely
             bool tryResult = TestPersistentSingleton.TryGetInstance(instance: out var tryInstance);
             Assert.IsTrue(condition: tryResult, message: "TryGetInstance should succeed on main thread");
             Assert.AreSame(expected: firstInstance, actual: tryInstance, message: "TryGetInstance should return same instance");
         }
 
         [UnityTest]
-        public IEnumerator ThreadSafety_ValidationLayer_PreventsBackgroundAccess()
+        public IEnumerator ThreadSafety_ValidationLayer_PreventsBackgroundAccess_And_LogsOnceInDev()
         {
-            // First, ensure main thread ID is captured
+#if !TEST_IS_DEV
+            Assert.Ignore(message: "Thread-safety log verification is dev-only.");
+            yield break;
+#else
             _ = TestPersistentSingleton.Instance;
             yield return null;
 
-            // Expect error log from ValidateMainThread
-            LogAssert.Expect(type: LogType.Error, message: new System.Text.RegularExpressions.Regex(pattern: "must be called from the main thread"));
-
-            // Test that the thread safety validation layer properly prevents background thread access
+            var start = TestLogCounter.Take();
             TestPersistentSingleton backgroundResult = null;
-            bool threadCompleted = false;
 
-            var thread = new System.Threading.Thread(() =>
+            using (new IgnoreFailingMessagesScope(enabled: true))
             {
-                try
+                var thread = new Thread(start: () =>
                 {
-                    // This should trigger the main thread validation and return null
                     backgroundResult = TestPersistentSingleton.Instance;
-                }
-                finally
-                {
-                    threadCompleted = true;
-                }
-            });
+                });
 
-            thread.Start();
-
-            while (!threadCompleted)
-            {
-                yield return null;
+                thread.Start();
+                yield return WaitForThread(thread: thread, context: "ThreadSafety_ValidationLayer_PreventsBackgroundAccess_And_LogsOnceInDev");
             }
 
             Assert.IsNull(anObject: backgroundResult, message: "Background thread access should return null");
+
+            var delta = TestLogCounter.Take().Delta(baseline: start);
+            Assert.AreEqual(expected: 1, actual: delta.Error, message: "Validation layer should log exactly one error (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Exception, message: "No exceptions expected (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Assert, message: "No asserts expected (dev-only)");
+#endif
         }
 
         [Test]
         public void ThreadSafety_MainThreadValidation_DoesNotInterfere()
         {
-            // Test that main thread validation doesn't interfere with normal operations
-            Assert.DoesNotThrow(() =>
+            Assert.DoesNotThrow(code: () =>
             {
                 var instance = TestPersistentSingleton.Instance;
                 Assert.IsNotNull(anObject: instance, message: "Instance creation should work on main thread");
             }, message: "Instance access should not throw on main thread");
 
-            Assert.DoesNotThrow(() =>
+            Assert.DoesNotThrow(code: () =>
             {
                 bool result = TestPersistentSingleton.TryGetInstance(instance: out var instance);
                 Assert.IsTrue(condition: result, message: "TryGetInstance should succeed");
@@ -625,7 +871,7 @@ namespace Singletons.Tests.Runtime
         {
             if (TestPersistentSingleton.TryGetInstance(instance: out var instance))
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
 
             default(TestPersistentSingleton).ResetStaticCacheForTesting();
@@ -637,10 +883,9 @@ namespace Singletons.Tests.Runtime
             var instance = TestPersistentSingleton.Instance;
             yield return null;
 
-            Object.DestroyImmediate(obj: instance.gameObject);
+            UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             yield return null;
 
-            // After destruction, TryGetInstance should return false
             bool exists = TestPersistentSingleton.TryGetInstance(instance: out _);
             Assert.IsFalse(condition: exists, message: "Instance should not exist after destruction");
         }
@@ -651,7 +896,7 @@ namespace Singletons.Tests.Runtime
             var first = TestPersistentSingleton.Instance;
             yield return null;
 
-            Object.DestroyImmediate(obj: first.gameObject);
+            UnityEngine.Object.DestroyImmediate(obj: first.gameObject);
             default(TestPersistentSingleton).ResetStaticCacheForTesting();
             yield return null;
 
@@ -662,7 +907,6 @@ namespace Singletons.Tests.Runtime
             Assert.AreNotSame(expected: first, actual: second, message: "Should be a different instance");
             Assert.AreEqual(expected: 1, actual: second.AwakeCount, message: "New instance should have fresh AwakeCount");
         }
-
     }
 
     [TestFixture]
@@ -673,21 +917,24 @@ namespace Singletons.Tests.Runtime
         {
             if (TestSceneSingleton.TryGetInstance(instance: out var instance))
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
 
             default(TestSceneSingleton).ResetStaticCacheForTesting();
         }
 
         [UnityTest]
-        public IEnumerator Instance_ThrowsInEditor_WhenNotPlaced()
+        public IEnumerator Instance_ThrowsInDev_WhenNotPlaced()
         {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Assert.Throws<System.InvalidOperationException>(() => { _ = TestSceneSingleton.Instance; }, message: "Should throw when SceneSingleton is not placed");
-            #else
+#if TEST_IS_DEV
+            Assert.Throws<InvalidOperationException>(
+                code: () => { _ = TestSceneSingleton.Instance; },
+                message: "Should throw when SceneSingleton is not placed (dev-only)"
+            );
+#else
             var instance = TestSceneSingleton.Instance;
-            Assert.IsNull(instance, "Should return null in release build");
-            #endif
+            Assert.IsNull(anObject: instance, message: "Should return null when not placed (non-dev build)");
+#endif
             yield return null;
         }
 
@@ -697,78 +944,10 @@ namespace Singletons.Tests.Runtime
             TestSceneSingleton.TryGetInstance(instance: out var before);
             yield return null;
 
-            // Even after accessing, it should not exist
             TestSceneSingleton.TryGetInstance(instance: out var after);
 
             Assert.IsNull(anObject: before, message: "Should not exist before");
             Assert.IsNull(anObject: after, message: "Should still not exist - no auto-creation");
-        }
-    }
-
-    /// <summary>
-    /// GameManager-like persistent singleton for practical usage testing
-    /// </summary>
-    public sealed class GameManager : GlobalSingleton<GameManager>
-    {
-        public int PlayerScore { get; private set; }
-        public string CurrentLevel { get; private set; }
-        public bool IsGamePaused { get; private set; }
-
-        protected override void Awake()
-        {
-            base.Awake();
-            PlayerScore = 0;
-            CurrentLevel = "MainMenu";
-            IsGamePaused = false;
-        }
-
-        public void AddScore(int points)
-        {
-            PlayerScore += points;
-        }
-
-        public void SetLevel(string levelName)
-        {
-            CurrentLevel = levelName;
-        }
-
-        public void PauseGame()
-        {
-            IsGamePaused = true;
-        }
-
-        public void ResumeGame()
-        {
-            IsGamePaused = false;
-        }
-    }
-
-    /// <summary>
-    /// LevelController-like scene singleton for practical usage testing
-    /// </summary>
-    public sealed class LevelController : SceneSingleton<LevelController>
-    {
-        public string LevelName { get; private set; }
-        public int EnemyCount { get; private set; }
-        public bool IsLevelComplete { get; private set; }
-
-        protected override void Awake()
-        {
-            base.Awake();
-            LevelName = "DefaultLevel";
-            EnemyCount = 5;
-            IsLevelComplete = false;
-        }
-
-        public void SetLevelInfo(string levelName, int enemies)
-        {
-            LevelName = levelName;
-            EnemyCount = enemies;
-        }
-
-        public void CompleteLevel()
-        {
-            IsLevelComplete = true;
         }
     }
 
@@ -778,14 +957,14 @@ namespace Singletons.Tests.Runtime
         [TearDown]
         public void TearDown()
         {
-            // Clean up any created instances
             if (TestPersistentSingleton.TryGetInstance(instance: out var persistent))
             {
-                Object.DestroyImmediate(obj: persistent.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: persistent.gameObject);
             }
+
             if (TestSceneSingleton.TryGetInstance(instance: out var scene))
             {
-                Object.DestroyImmediate(obj: scene.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: scene.gameObject);
             }
 
             default(TestPersistentSingleton).ResetStaticCacheForTesting();
@@ -795,7 +974,6 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator PersistentPolicy_EnablesAutoCreation()
         {
-            // Access Instance - should auto-create due to PersistentPolicy
             var instance = TestPersistentSingleton.Instance;
             yield return null;
 
@@ -806,13 +984,14 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator ScenePolicy_DisablesAutoCreation()
         {
-            // Try to access Instance when not placed - should throw exception due to ScenePolicy
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Assert.Throws<System.InvalidOperationException>(() => { _ = TestSceneSingleton.Instance; },
-                message: "ScenePolicy should throw exception when not placed (DEV/EDITOR)");
+#if TEST_IS_DEV
+            Assert.Throws<InvalidOperationException>(
+                code: () => { _ = TestSceneSingleton.Instance; },
+                message: "ScenePolicy should throw exception when not placed (dev-only)"
+            );
 #else
             var instance = TestSceneSingleton.Instance;
-            Assert.IsNull(instance, message: "ScenePolicy should return null when not placed (Release)");
+            Assert.IsNull(anObject: instance, message: "ScenePolicy should return null when not placed (non-dev build)");
 #endif
             yield return null;
         }
@@ -823,32 +1002,14 @@ namespace Singletons.Tests.Runtime
             var instance = TestPersistentSingleton.Instance;
             yield return null;
 
-            // Check if DontDestroyOnLoad was applied
             Assert.IsTrue(
                 condition: instance.gameObject.scene.name == "DontDestroyOnLoad" || instance.transform.parent == null,
                 message: "Persistent singleton should be in DontDestroyOnLoad scene or root"
             );
 
-            // Verify it's still accessible after scene operations
             var sameInstance = TestPersistentSingleton.Instance;
             Assert.AreSame(expected: instance, actual: sameInstance, message: "Should return the same instance after DontDestroyOnLoad");
         }
-    }
-
-    [TestFixture]
-    public class ErrorRecoveryTests
-    {
-        [TearDown]
-        public void TearDown()
-        {
-            // Clean up any created instances
-            if (TestPersistentSingleton.TryGetInstance(instance: out var instance))
-            {
-                Object.DestroyImmediate(obj: instance.gameObject);
-            }
-            default(TestPersistentSingleton).ResetStaticCacheForTesting();
-        }
-
     }
 
     [TestFixture]
@@ -857,11 +1018,11 @@ namespace Singletons.Tests.Runtime
         [TearDown]
         public void TearDown()
         {
-            // Clean up any created instances
             if (TestPersistentSingleton.TryGetInstance(instance: out var instance))
             {
-                Object.DestroyImmediate(obj: instance.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             }
+
             default(TestPersistentSingleton).ResetStaticCacheForTesting();
         }
 
@@ -873,11 +1034,9 @@ namespace Singletons.Tests.Runtime
 
             Assert.IsNotNull(anObject: instance, message: "Should create instance");
 
-            // Destroy the instance
-            Object.DestroyImmediate(obj: instance.gameObject);
+            UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             yield return null;
 
-            // Access again - should create new instance
             var newInstance = TestPersistentSingleton.Instance;
             yield return null;
 
@@ -893,17 +1052,13 @@ namespace Singletons.Tests.Runtime
 
             Assert.IsNotNull(anObject: firstInstance, message: "Should create first instance");
 
-            // Destroy first instance while keeping reference
-            Object.DestroyImmediate(obj: firstInstance.gameObject);
+            UnityEngine.Object.DestroyImmediate(obj: firstInstance.gameObject);
             yield return null;
 
-            // Create new instance
             var secondInstance = TestPersistentSingleton.Instance;
             yield return null;
 
             Assert.IsNotNull(anObject: secondInstance, message: "Should create second instance");
-
-            // Verify second instance is functional
             Assert.AreNotSame(expected: firstInstance, actual: secondInstance, message: "Should be different instances");
             Assert.IsFalse(condition: ReferenceEquals(objA: null, objB: secondInstance.gameObject), message: "Second instance GameObject should exist");
         }
@@ -916,12 +1071,10 @@ namespace Singletons.Tests.Runtime
 
             Assert.IsNotNull(anObject: instance, message: "Should create instance");
 
-            // Access while instance still exists
             var sameInstance = TestPersistentSingleton.Instance;
             Assert.AreSame(expected: instance, actual: sameInstance, message: "Should return same instance while alive");
 
-            // Destroy and verify TryGetInstance behavior
-            Object.DestroyImmediate(obj: instance.gameObject);
+            UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
             yield return null;
 
             bool result = TestPersistentSingleton.TryGetInstance(instance: out var retrieved);
@@ -936,17 +1089,15 @@ namespace Singletons.Tests.Runtime
         [TearDown]
         public void TearDown()
         {
-            // Clean up GameManager
             if (GameManager.TryGetInstance(instance: out var gm))
             {
-                Object.DestroyImmediate(obj: gm.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: gm.gameObject);
             }
             default(GameManager).ResetStaticCacheForTesting();
 
-            // Clean up LevelController
             if (LevelController.TryGetInstance(instance: out var lc))
             {
-                Object.DestroyImmediate(obj: lc.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: lc.gameObject);
             }
             default(LevelController).ResetStaticCacheForTesting();
         }
@@ -954,7 +1105,6 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator GameManager_PersistsAcrossAccess()
         {
-            // First access should create instance
             var gm1 = GameManager.Instance;
             yield return null;
 
@@ -962,12 +1112,10 @@ namespace Singletons.Tests.Runtime
             Assert.AreEqual(expected: 0, actual: gm1.PlayerScore, message: "Initial score should be 0");
             Assert.AreEqual(expected: "MainMenu", actual: gm1.CurrentLevel, message: "Initial level should be MainMenu");
 
-            // Modify state
             gm1.AddScore(points: 100);
             gm1.SetLevel(levelName: "Level1");
             gm1.PauseGame();
 
-            // Second access should return same instance
             var gm2 = GameManager.Instance;
             yield return null;
 
@@ -980,19 +1128,16 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator LevelController_RequiresPlacement()
         {
-            // Without placement, should return null
             bool result = LevelController.TryGetInstance(instance: out var controller);
             yield return null;
 
             Assert.IsFalse(condition: result, message: "Should return false when not placed");
             Assert.IsNull(anObject: controller, message: "Controller should be null");
 
-            // Place in scene
             var go = new GameObject(name: "LevelController");
             var placedController = go.AddComponent<LevelController>();
             yield return null;
 
-            // Now should work
             bool result2 = LevelController.TryGetInstance(instance: out var controller2);
             yield return null;
 
@@ -1004,26 +1149,21 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator Singleton_StateManagement_WorksCorrectly()
         {
-            // Test GameManager state management
             var gm = GameManager.Instance;
             yield return null;
 
-            // Initial state
             Assert.AreEqual(expected: 0, actual: gm.PlayerScore);
             Assert.AreEqual(expected: "MainMenu", actual: gm.CurrentLevel);
             Assert.IsFalse(condition: gm.IsGamePaused);
 
-            // Modify state like a real game
             gm.AddScore(points: 500);
             gm.SetLevel(levelName: "BossLevel");
             gm.PauseGame();
 
-            // Verify state changes
             Assert.AreEqual(expected: 500, actual: gm.PlayerScore);
             Assert.AreEqual(expected: "BossLevel", actual: gm.CurrentLevel);
             Assert.IsTrue(condition: gm.IsGamePaused);
 
-            // Resume and continue
             gm.AddScore(points: 1000);
             gm.SetLevel(levelName: "Victory");
             gm.ResumeGame();
@@ -1036,23 +1176,16 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator SceneSingleton_LevelManagement_WorksCorrectly()
         {
-            // Create and place LevelController
             var go = new GameObject(name: "LevelController");
             var controller = go.AddComponent<LevelController>();
             yield return null;
 
-            // Initial state
             Assert.AreEqual(expected: "DefaultLevel", actual: controller.LevelName);
             Assert.AreEqual(expected: 5, actual: controller.EnemyCount);
             Assert.IsFalse(condition: controller.IsLevelComplete);
 
-            // Simulate level progression
             controller.SetLevelInfo(levelName: "CastleLevel", enemies: 10);
-
-            // Simulate gameplay - defeat all enemies
             controller.SetLevelInfo(levelName: "CastleLevel", enemies: 0);
-
-            // Complete level
             controller.CompleteLevel();
 
             Assert.AreEqual(expected: "CastleLevel", actual: controller.LevelName);
@@ -1063,26 +1196,21 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator Singleton_InitializationOrder_WorksCorrectly()
         {
-            // Create multiple singletons to test initialization order
             var gm = GameManager.Instance;
             yield return null;
 
-            // Place level controller
             var go = new GameObject(name: "LevelController");
             var lc = go.AddComponent<LevelController>();
             yield return null;
 
-            // Both should be properly initialized
             Assert.IsNotNull(anObject: gm);
             Assert.IsNotNull(anObject: lc);
             Assert.AreEqual(expected: 0, actual: gm.PlayerScore);
             Assert.AreEqual(expected: "DefaultLevel", actual: lc.LevelName);
 
-            // Modify both
             gm.AddScore(points: 100);
             lc.SetLevelInfo(levelName: "OrderedLevel", enemies: 3);
 
-            // Verify both maintain state
             Assert.AreEqual(expected: 100, actual: gm.PlayerScore);
             Assert.AreEqual(expected: "OrderedLevel", actual: lc.LevelName);
             Assert.AreEqual(expected: 3, actual: lc.EnemyCount);
@@ -1091,19 +1219,15 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator Singleton_ResourceManagement_WorksCorrectly()
         {
-            // Test proper cleanup on destroy
             var gm = GameManager.Instance;
             yield return null;
 
-            // Set up some state
             gm.AddScore(points: 999);
             gm.SetLevel(levelName: "FinalLevel");
 
-            // Destroy instance (simulate scene unload for persistent singleton)
-            Object.DestroyImmediate(obj: gm.gameObject);
+            UnityEngine.Object.DestroyImmediate(obj: gm.gameObject);
             yield return null;
 
-            // Next access should create new instance with fresh state
             var gm2 = GameManager.Instance;
             yield return null;
 
@@ -1114,31 +1238,30 @@ namespace Singletons.Tests.Runtime
         }
     }
 
-    /// <summary>
-    /// Tests for Domain Reload disabled scenarios.
-    /// These tests verify that singleton infrastructure properly handles
-    /// Play session boundaries when Domain Reload is disabled.
-    /// </summary>
     [TestFixture]
     public class DomainReloadTests
     {
         [TearDown]
         public void TearDown()
         {
-            // Reset quitting flag FIRST so TryGetInstance works
             TestExtensions.ResetQuittingFlagForTesting();
 
-            // Clean up instances directly to avoid TryGetInstance issues
-            var softResetInstances = Object.FindObjectsByType<TestSoftResetSingleton>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            var softResetInstances = UnityEngine.Object.FindObjectsByType<TestSoftResetSingleton>(
+                findObjectsInactive: FindObjectsInactive.Include,
+                sortMode: FindObjectsSortMode.None
+            );
             foreach (var inst in softResetInstances)
             {
-                Object.DestroyImmediate(obj: inst.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: inst.gameObject);
             }
 
-            var persistentInstances = Object.FindObjectsByType<TestPersistentSingleton>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            var persistentInstances = UnityEngine.Object.FindObjectsByType<TestPersistentSingleton>(
+                findObjectsInactive: FindObjectsInactive.Include,
+                sortMode: FindObjectsSortMode.None
+            );
             foreach (var inst in persistentInstances)
             {
-                Object.DestroyImmediate(obj: inst.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: inst.gameObject);
             }
 
             default(TestSoftResetSingleton).ResetStaticCacheForTesting();
@@ -1148,16 +1271,13 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator StaticCache_IsInvalidated_WhenPlaySessionIdChanges()
         {
-            // Create and cache instance
             var instance = TestPersistentSingleton.Instance;
             yield return null;
 
             Assert.IsNotNull(anObject: instance, message: "Instance should be created");
 
-            // Simulate Play session boundary (Domain Reload disabled scenario)
             TestExtensions.AdvancePlaySessionIdForTesting();
 
-            // Access again - cache should be invalidated but same GameObject reused
             var sameInstance = TestPersistentSingleton.Instance;
             yield return null;
 
@@ -1172,7 +1292,6 @@ namespace Singletons.Tests.Runtime
 
             Assert.AreEqual(expected: 1, actual: instance.PlaySessionStartCalls, message: "OnPlaySessionStart should be called once initially");
 
-            // Simulate multiple Play session boundaries
             TestExtensions.AdvancePlaySessionIdForTesting();
             _ = TestSoftResetSingleton.Instance;
             yield return null;
@@ -1194,7 +1313,6 @@ namespace Singletons.Tests.Runtime
 
             Assert.AreEqual(expected: 1, actual: instance.AwakeCalls, message: "Awake should be called once on creation");
 
-            // Cross multiple Play session boundaries
             for (int i = 0; i < 3; i++)
             {
                 TestExtensions.AdvancePlaySessionIdForTesting();
@@ -1215,7 +1333,6 @@ namespace Singletons.Tests.Runtime
             Assert.IsTrue(condition: resultBefore, message: "Should find instance before boundary");
             Assert.AreSame(expected: instance, actual: retrieved1);
 
-            // Cross Play session boundary
             TestExtensions.AdvancePlaySessionIdForTesting();
 
             bool resultAfter = TestPersistentSingleton.TryGetInstance(instance: out var retrieved2);
@@ -1231,10 +1348,8 @@ namespace Singletons.Tests.Runtime
 
             Assert.IsNotNull(anObject: instance, message: "Instance should exist before quitting");
 
-            // Simulate quitting
             Core.SingletonRuntime.NotifyQuitting();
 
-            // TryGetInstance should return false during quit
             bool result = TestPersistentSingleton.TryGetInstance(instance: out var retrieved);
             Assert.IsFalse(condition: result, message: "TryGetInstance should return false when quitting");
             Assert.IsNull(anObject: retrieved, message: "Retrieved instance should be null when quitting");
@@ -1243,44 +1358,40 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator NewInstance_IsNotCreated_WhenQuitting()
         {
-            // Simulate quitting before any instance exists
             Core.SingletonRuntime.NotifyQuitting();
 
-            // Try to access Instance - should return null, not create new
             var instance = TestPersistentSingleton.Instance;
 
             Assert.IsNull(anObject: instance, message: "Should not create instance when quitting");
 
-            // Verify no instance was created
-            var found = Object.FindAnyObjectByType<TestPersistentSingleton>();
+            var found = UnityEngine.Object.FindAnyObjectByType<TestPersistentSingleton>();
             Assert.IsNull(anObject: found, message: "No instance should exist in scene");
 
             yield return null;
         }
     }
 
-    /// <summary>
-    /// Tests for singleton behavior with parent GameObjects.
-    /// </summary>
     [TestFixture]
     public class ParentHierarchyTests
     {
         [TearDown]
         public void TearDown()
         {
-            var allObjects = Object.FindObjectsByType<TestPersistentSingleton>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            var allObjects = UnityEngine.Object.FindObjectsByType<TestPersistentSingleton>(
+                findObjectsInactive: FindObjectsInactive.Include,
+                sortMode: FindObjectsSortMode.None
+            );
             foreach (var obj in allObjects)
             {
-                Object.DestroyImmediate(obj: obj.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: obj.gameObject);
             }
 
-            // Clean up any parent objects
-            var parents = Object.FindObjectsByType<GameObject>(sortMode: FindObjectsSortMode.None);
+            var parents = UnityEngine.Object.FindObjectsByType<GameObject>(sortMode: FindObjectsSortMode.None);
             foreach (var parent in parents)
             {
                 if (parent.name.Contains(value: "Parent"))
                 {
-                    Object.DestroyImmediate(obj: parent);
+                    UnityEngine.Object.DestroyImmediate(obj: parent);
                 }
             }
 
@@ -1290,49 +1401,37 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator PersistentSingleton_WithParent_IsReparentedToRoot()
         {
-            // Create parent-child hierarchy
+            var start = TestLogCounter.Take();
+
             var parent = new GameObject(name: "ParentObject");
             var child = new GameObject(name: "TestPersistentSingleton");
             child.transform.SetParent(p: parent.transform);
 
-            // Expect warning log about reparenting
-            LogAssert.Expect(type: LogType.Warning, message: new System.Text.RegularExpressions.Regex(pattern: @".*Reparented.*root.*"));
-
-            // Add singleton component
             child.AddComponent<TestPersistentSingleton>();
             yield return null;
 
-            // Access via Instance to trigger initialization
             var instance = TestPersistentSingleton.Instance;
             yield return null;
 
-            // Should be reparented to root for DontDestroyOnLoad
             Assert.IsNull(anObject: instance.transform.parent, message: "Singleton should be reparented to root");
+
+            var delta = TestLogCounter.Take().Delta(baseline: start);
+
+#if TEST_IS_DEV
+            Assert.AreEqual(expected: 1, actual: delta.Warning, message: "Reparenting should emit exactly one warning log (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Exception, message: "No exceptions expected (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Assert, message: "No asserts expected (dev-only)");
+#endif
         }
 
         [UnityTest]
         public IEnumerator AutoCreatedSingleton_HasNoParent()
         {
-            // Auto-create singleton
             var instance = TestPersistentSingleton.Instance;
             yield return null;
 
             Assert.IsNull(anObject: instance.transform.parent, message: "Auto-created singleton should have no parent");
             Assert.AreEqual(expected: "TestPersistentSingleton", actual: instance.gameObject.name, message: "Auto-created singleton should have type name");
-        }
-    }
-
-    /// <summary>
-    /// Tests for base.Awake() call enforcement.
-    /// </summary>
-    public sealed class TestSingletonWithoutBaseAwake : GlobalSingleton<TestSingletonWithoutBaseAwake>
-    {
-        public bool AwakeWasCalled { get; private set; }
-
-        protected override void Awake()
-        {
-            // Deliberately NOT calling base.Awake() to test error detection
-            AwakeWasCalled = true;
         }
     }
 
@@ -1342,33 +1441,44 @@ namespace Singletons.Tests.Runtime
         [TearDown]
         public void TearDown()
         {
-            var allObjects = Object.FindObjectsByType<TestSingletonWithoutBaseAwake>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            var allObjects = UnityEngine.Object.FindObjectsByType<TestSingletonWithoutBaseAwake>(
+                findObjectsInactive: FindObjectsInactive.Include,
+                sortMode: FindObjectsSortMode.None
+            );
             foreach (var obj in allObjects)
             {
-                Object.DestroyImmediate(obj: obj.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: obj.gameObject);
             }
 
             default(TestSingletonWithoutBaseAwake).ResetStaticCacheForTesting();
         }
 
         [UnityTest]
-        public IEnumerator Singleton_LogsError_WhenBaseAwakeNotCalled()
+        public IEnumerator Singleton_LogsError_WhenBaseAwakeNotCalled_InDev()
         {
-            // Expect error log about base.Awake() not being called
-            LogAssert.Expect(type: LogType.Error, message: new System.Text.RegularExpressions.Regex(pattern: @".*base\.Awake\(\).*not called.*"));
+#if !TEST_IS_DEV
+            Assert.Ignore(message: "base.Awake enforcement log verification is dev-only.");
+            yield break;
+#else
+            var start = TestLogCounter.Take();
 
-            var go = new GameObject(name: "TestSingletonWithoutBaseAwake");
-            var singleton = go.AddComponent<TestSingletonWithoutBaseAwake>();
-            yield return null;
+            using (new IgnoreFailingMessagesScope(enabled: true))
+            {
+                var go = new GameObject(name: "TestSingletonWithoutBaseAwake");
+                var singleton = go.AddComponent<TestSingletonWithoutBaseAwake>();
+                yield return null;
 
-            // Awake was called but base.Awake() was not - OnEnable should log error
-            Assert.IsTrue(condition: singleton.AwakeWasCalled, message: "Custom Awake should have been called");
+                Assert.IsTrue(condition: singleton.AwakeWasCalled, message: "Custom Awake should have been called");
+            }
+
+            var delta = TestLogCounter.Take().Delta(baseline: start);
+            Assert.AreEqual(expected: 1, actual: delta.Error, message: "Missing base.Awake should emit exactly one error log (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Exception, message: "No exceptions expected (dev-only)");
+            Assert.AreEqual(expected: 0, actual: delta.Assert, message: "No asserts expected (dev-only)");
+#endif
         }
     }
 
-    /// <summary>
-    /// Tests for edge cases and error recovery.
-    /// </summary>
     [TestFixture]
     public class EdgeCaseTests
     {
@@ -1377,12 +1487,12 @@ namespace Singletons.Tests.Runtime
         {
             if (TestSceneSingleton.TryGetInstance(instance: out var scene))
             {
-                Object.DestroyImmediate(obj: scene.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: scene.gameObject);
             }
 
             if (TestPersistentSingleton.TryGetInstance(instance: out var persistent))
             {
-                Object.DestroyImmediate(obj: persistent.gameObject);
+                UnityEngine.Object.DestroyImmediate(obj: persistent.gameObject);
             }
 
             default(TestSceneSingleton).ResetStaticCacheForTesting();
@@ -1398,10 +1508,8 @@ namespace Singletons.Tests.Runtime
 
             Assert.IsNotNull(anObject: instance);
 
-            // Destroy via DestroyImmediate
-            Object.DestroyImmediate(obj: instance.gameObject);
+            UnityEngine.Object.DestroyImmediate(obj: instance.gameObject);
 
-            // Cache should be cleared
             bool exists = TestPersistentSingleton.TryGetInstance(instance: out var retrieved);
             Assert.IsFalse(condition: exists, message: "TryGetInstance should return false after destruction");
             Assert.IsNull(anObject: retrieved, message: "Retrieved instance should be null");
@@ -1410,7 +1518,7 @@ namespace Singletons.Tests.Runtime
         [UnityTest]
         public IEnumerator MultipleRapidAccesses_ReturnSameInstance()
         {
-            TestPersistentSingleton[] instances = new TestPersistentSingleton[10];
+            var instances = new TestPersistentSingleton[10];
 
             for (int i = 0; i < 10; i++)
             {
@@ -1424,25 +1532,26 @@ namespace Singletons.Tests.Runtime
                 Assert.AreSame(expected: instances[0], actual: instances[i], message: $"Access {i} should return same instance");
             }
 
-            Assert.AreEqual(expected: 1, actual: Object.FindObjectsByType<TestPersistentSingleton>(sortMode: FindObjectsSortMode.None).Length, message: "Only one instance should exist");
+            Assert.AreEqual(
+                expected: 1,
+                actual: UnityEngine.Object.FindObjectsByType<TestPersistentSingleton>(sortMode: FindObjectsSortMode.None).Length,
+                message: "Only one instance should exist"
+            );
         }
 
         [UnityTest]
         public IEnumerator SceneSingleton_AccessBeforePlacement_ThenPlacement_Works()
         {
-            // Try to access before placement
             bool beforeResult = TestSceneSingleton.TryGetInstance(instance: out var before);
             Assert.IsFalse(condition: beforeResult, message: "Should not find instance before placement");
             Assert.IsNull(anObject: before);
 
             yield return null;
 
-            // Now place instance
             var go = new GameObject(name: "TestSceneSingleton");
             var placed = go.AddComponent<TestSceneSingleton>();
             yield return null;
 
-            // Should now find it
             bool afterResult = TestSceneSingleton.TryGetInstance(instance: out var after);
             Assert.IsTrue(condition: afterResult, message: "Should find instance after placement");
             Assert.AreSame(expected: placed, actual: after);

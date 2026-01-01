@@ -1,4 +1,4 @@
-namespace Singletons.Policy
+namespace TomoLudens.PolicySingleton.Policy
 {
     /// <summary>
     /// Policy for application-lifetime singletons: persists across scenes, auto-creates if missing.

@@ -1,4 +1,4 @@
-# Policy-Driven Unity Singleton (v3.1.0)
+# Policy-Driven Unity Singleton (v1.0.0)
 
 [Japanese README](./README.ja.md)
 
@@ -94,8 +94,9 @@ Notes on quitting (important):
 │  │  • Auto-create if missing │    │  • No auto-create             │ │
 │  └─────────────┬─────────────┘    └───────────────┬───────────────┘ │
 └────────────────┼──────────────────────────────────┼─────────────────┘
-                 │          inheritance             │
+                 │                                  │
                  └──────────────┬───────────────────┘
+                                │ inheritance
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                 SingletonBehaviour<T, TPolicy>                      │
@@ -124,7 +125,7 @@ Notes on quitting (important):
 
  Notes:
  - **Editor hooks direction**: `SingletonEditorHooks` (Editor-only) calls `SingletonRuntime.NotifyQuitting()`; runtime code does not depend on Editor hooks.
- - **Namespaces/assemblies**: `SingletonEditorHooks` exists under `Singletons.Core.Editor` and is compiled only in the Editor.
+- **Namespaces/assemblies**: `SingletonEditorHooks` exists under `TomoLudens.PolicySingleton.Editor` and is compiled only in the Editor.
 
 ### Policy Comparison
 
@@ -181,29 +182,30 @@ classDiagram
 ## Directory Structure
 
 ```text
-Singletons/
-├── Singletons.asmdef                       # Assembly Definition
-├── AssemblyInfo.cs                         # InternalsVisibleTo (for tests)
-├── GlobalSingleton.cs                      # Public API (persistent + auto-create)
-├── SceneSingleton.cs                       # Public API (scene-scoped + no auto-create)
+PolicySingleton/
 ├── Core/
-│   ├── SingletonBehaviour.cs               # Core implementation
-│   ├── SingletonRuntime.cs                 # Internal runtime (Domain Reload handling)
-│   ├── SingletonLogger.cs                  # Conditional logger (stripped in release)
-│   └── Editor/
-│       └── SingletonEditorHooks.cs         # Editor event hooks (Play Mode state)
+│   ├── AssemblyInfo.cs                                  # InternalsVisibleTo (for tests)
+│   ├── SingletonBehaviour.cs                            # Core implementation
+│   ├── SingletonLogger.cs                               # Conditional logger (stripped in release)
+│   └── SingletonRuntime.cs                              # Internal runtime (Domain Reload handling)
+├── Editor/
+│   ├── SingletonEditorHooks.cs                          # Editor event hooks (Play Mode state)
+│   └── TomoLudens.PolicySingleton.Editor.asmdef         # Editor assembly definition
 ├── Policy/
-│   ├── ISingletonPolicy.cs                 # Policy interface
-│   ├── PersistentPolicy.cs                 # Persistent policy implementation
-│   └── SceneScopedPolicy.cs                # Scene-scoped policy implementation
-└── Tests/                                  # PlayMode & EditMode tests
-    ├── TestExtensions.cs                   # Test helpers
-    ├── Editor/
-    │   ├── Singletons.Editor.Tests.asmdef  # Editor test assembly
-    │   └── EditModeTests.cs                # EditMode tests
-    └── Runtime/
-        ├── Singletons.Tests.asmdef         # Runtime test assembly
-        └── SingletonTests.cs               # PlayMode tests
+│   ├── ISingletonPolicy.cs                              # Policy interface
+│   ├── PersistentPolicy.cs                              # Persistent policy implementation
+│   └── SceneScopedPolicy.cs                             # Scene-scoped policy implementation
+├── Tests/                                               # PlayMode & EditMode tests
+│   ├── Editor/
+│   │   ├── PolicySingletonEditorTests.cs                # EditMode tests
+│   │   └── TomoLudens.PolicySingleton.Editor.Tests.asmdef # Editor test assembly
+│   ├── Runtime/
+│   │   ├── PolicySingletonRuntimeTests.cs               # PlayMode tests
+│   │   └── TomoLudens.PolicySingleton.Tests.asmdef      # Runtime test assembly
+│   └── TestExtensions.cs                                # Test-only extension methods
+├── GlobalSingleton.cs                                      # Public API (persistent + auto-create)
+├── SceneSingleton.cs                                       # Public API (scene-scoped + no auto-create)
+└── TomoLudens.PolicySingleton.asmdef                       # Assembly Definition
 ```
 
 ## Dependencies (Assumed Unity API Behavior)
@@ -219,7 +221,7 @@ This implementation assumes the following Unity behaviors. If Unity changes thes
 
 ## Installation
 
-1. Place the `Singletons` folder anywhere in your project (e.g., `Assets/Plugins/Singletons/`).
+1. Place the `PolicySingleton` folder anywhere in your project (e.g., `Assets/Plugins/PolicySingleton/`).
 2. Adjust namespaces and assembly definitions as needed.
 
 ## Usage
@@ -229,7 +231,7 @@ This implementation assumes the following Unity behaviors. If Unity changes thes
 Persists across scenes, and auto-creates when accessed if not found.
 
 ```csharp
-using Singletons;
+using TomoLudens.PolicySingleton;
 
 // Sealing is recommended to prevent accidental inheritance.
 public sealed class GameManager : GlobalSingleton<GameManager>
@@ -297,7 +299,7 @@ public sealed class GameManager : GlobalSingleton<GameManager>
 Must be placed in the scene. No auto-creation. Destroyed when the scene unloads.
 
 ```csharp
-using Singletons;
+using TomoLudens.PolicySingleton;
 
 public sealed class LevelController : SceneSingleton<LevelController>
 {

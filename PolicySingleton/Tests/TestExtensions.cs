@@ -1,7 +1,7 @@
-using Singletons.Core;
-using Singletons.Policy;
+using TomoLudens.PolicySingleton.Core;
+using TomoLudens.PolicySingleton.Policy;
 
-namespace Singletons.Tests
+namespace TomoLudens.PolicySingleton.Tests
 {
     /// <summary>
     /// Test-only extension methods for singleton testing.

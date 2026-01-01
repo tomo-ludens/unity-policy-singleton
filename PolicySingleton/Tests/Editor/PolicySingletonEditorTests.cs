@@ -1,11 +1,12 @@
+using System.Text.RegularExpressions;
 using NUnit.Framework;
-using Singletons.Core;
-using Singletons.Policy;
+using TomoLudens.PolicySingleton.Core;
+using TomoLudens.PolicySingleton.Policy;
 using UnityEngine;
 using UnityEngine.TestTools;
 
 // ReSharper disable RedundantOverriddenMember
-namespace Singletons.Tests.Editor
+namespace TomoLudens.PolicySingleton.Tests.Editor
 {
     [TestFixture]
     public class SingletonRuntimeEditModeTests
@@ -319,40 +320,44 @@ namespace Singletons.Tests.Editor
     [TestFixture]
     public class SingletonLoggerEditModeTests
     {
+        private static Regex BuildTypedLogRegex<T>(string message)
+        {
+            string typeName = typeof(T).FullName ?? typeof(T).Name;
+            string pattern = @"^\[" + Regex.Escape(str: typeName) + @"\]\s*" + Regex.Escape(str: message) + @"\s*$";
+            return new Regex(pattern: pattern, options: RegexOptions.Singleline);
+        }
+
         [Test]
         public void Log_WithTypeParameter_FormatsCorrectly()
         {
             // Expect the log to avoid test failure
-            LogAssert.Expect(type: LogType.Log, message: "[Singletons.Tests.Editor.TestPersistentSingletonForEditMode] Test info message");
+            LogAssert.Expect(type: LogType.Log, message: BuildTypedLogRegex<TestPersistentSingletonForEditMode>(message: "Test info message"));
 
-            Assert.DoesNotThrow(() =>
-            {
-                SingletonLogger.Log<TestPersistentSingletonForEditMode>(message: "Test info message");
-            });
+            SingletonLogger.Log<TestPersistentSingletonForEditMode>(message: "Test info message");
+
+            LogAssert.NoUnexpectedReceived();
         }
 
         [Test]
         public void LogWarning_WithTypeParameter_FormatsCorrectly()
         {
             // Expect the warning log to avoid test failure
-            LogAssert.Expect(type: LogType.Warning, message: "[Singletons.Tests.Editor.TestPersistentSingletonForEditMode] Test warning message");
+            LogAssert.Expect(type: LogType.Warning, message: BuildTypedLogRegex<TestPersistentSingletonForEditMode>(message: "Test warning message"));
 
-            Assert.DoesNotThrow(() =>
-            {
-                SingletonLogger.LogWarning<TestPersistentSingletonForEditMode>(message: "Test warning message");
-            });
+            SingletonLogger.LogWarning<TestPersistentSingletonForEditMode>(message: "Test warning message");
+
+            LogAssert.NoUnexpectedReceived();
         }
 
         [Test]
         public void LogError_WithTypeParameter_FormatsCorrectly()
         {
             // Expect the error log to avoid test failure
-            LogAssert.Expect(type: LogType.Error, message: "[Singletons.Tests.Editor.TestPersistentSingletonForEditMode] Test error message");
+            LogAssert.Expect(type: LogType.Error, message: BuildTypedLogRegex<TestPersistentSingletonForEditMode>(message: "Test error message"));
 
-            Assert.DoesNotThrow(() =>
-            {
-                SingletonLogger.LogError<TestPersistentSingletonForEditMode>(message: "Test error message");
-            });
+            SingletonLogger.LogError<TestPersistentSingletonForEditMode>(message: "Test error message");
+
+            LogAssert.NoUnexpectedReceived();
         }
 
         [Test]

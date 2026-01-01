@@ -1,7 +1,8 @@
 {
-    "name": "Singletons.Tests",
+    "name": "TomoLudens.PolicySingleton.Tests",
+    "rootNamespace": "TomoLudens",
     "references": [
-        "Singletons"
+        "TomoLudens.PolicySingleton"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
