@@ -185,28 +185,28 @@ classDiagram
 ```text
 PolicySingleton/
 ├── Core/
-│   ├── AssemblyInfo.cs                                  # InternalsVisibleTo（テスト用）
-│   ├── SingletonBehaviour.cs                            # コア実装
-│   ├── SingletonRuntime.cs                              # 内部ランタイム（Domain Reload対策）
-│   └── SingletonLogger.cs                               # 条件付きロガー（リリースで除去）
+│   ├── AssemblyInfo.cs                                     # InternalsVisibleTo（テスト用）
+│   ├── SingletonBehaviour.cs                               # コア実装
+│   ├── SingletonRuntime.cs                                 # 内部ランタイム（Domain Reload対策）
+│   └── SingletonLogger.cs                                  # 条件付きロガー（リリースで除去）
 ├── Editor/
-│   ├── SingletonEditorHooks.cs                          # Editorイベントフック（Play Mode状態）
-│   └── TomoLudens.PolicySingleton.Editor.asmdef         # Editor用アセンブリ定義
+│   ├── SingletonEditorHooks.cs                             # Editorイベントフック（Play Mode状態）
+│   └── TomoLudens.PolicySingleton.Editor.asmdef            # Editor用アセンブリ定義
 ├── Policy/
-│   ├── ISingletonPolicy.cs                              # ポリシーインターフェース
-│   ├── PersistentPolicy.cs                              # 永続ポリシーの実装
-│   └── SceneScopedPolicy.cs                             # シーンスコープポリシーの実装
-├── Tests/                                               # PlayMode & EditMode テスト
+│   ├── ISingletonPolicy.cs                                 # ポリシーインターフェース
+│   ├── PersistentPolicy.cs                                 # 永続ポリシーの実装
+│   └── SceneScopedPolicy.cs                                # シーンスコープポリシーの実装
+├── Tests/                                                  # PlayMode & EditMode テスト
 │   ├── Editor/
-│   │   ├── PolicySingletonEditorTests.cs                # EditModeテスト
-│   │   └── TomoLudens.PolicySingleton.Editor.Tests.asmdef # Editorテスト用アセンブリ定義
+│   │   ├── PolicySingletonEditorTests.cs                   # EditModeテスト
+│   │   └── TomoLudens.PolicySingleton.Editor.Tests.asmdef  # Editorテスト用アセンブリ定義
 │   ├── Runtime/
-│   │   ├── PolicySingletonRuntimeTests.cs               # PlayModeテスト
-│   │   └── TomoLudens.PolicySingleton.Tests.asmdef      # Runtimeテスト用アセンブリ定義
-│   └── TestExtensions.cs                                # テスト用拡張メソッド
-├── GlobalSingleton.cs                                   # Public API（永続・自動生成あり）
-├── SceneSingleton.cs                                    # Public API（シーン限定・自動生成なし）
-└── TomoLudens.PolicySingleton.asmdef                    # Assembly Definition
+│   │   ├── PolicySingletonRuntimeTests.cs                  # PlayModeテスト
+│   │   └── TomoLudens.PolicySingleton.Tests.asmdef         # Runtimeテスト用アセンブリ定義
+│   └── TestExtensions.cs                                   # テスト用拡張メソッド
+├── GlobalSingleton.cs                                      # Public API（永続・自動生成あり）
+├── SceneSingleton.cs                                       # Public API（シーン限定・自動生成なし）
+└── TomoLudens.PolicySingleton.asmdef                       # Assembly Definition
 ```
 
 ## Dependencies / 前提としている Unity API の挙動

@@ -184,25 +184,25 @@ classDiagram
 ```text
 PolicySingleton/
 ├── Core/
-│   ├── AssemblyInfo.cs                                  # InternalsVisibleTo (for tests)
-│   ├── SingletonBehaviour.cs                            # Core implementation
-│   ├── SingletonLogger.cs                               # Conditional logger (stripped in release)
-│   └── SingletonRuntime.cs                              # Internal runtime (Domain Reload handling)
+│   ├── AssemblyInfo.cs                                     # InternalsVisibleTo (for tests)
+│   ├── SingletonBehaviour.cs                               # Core implementation
+│   ├── SingletonLogger.cs                                  # Conditional logger (stripped in release)
+│   └── SingletonRuntime.cs                                 # Internal runtime (Domain Reload handling)
 ├── Editor/
-│   ├── SingletonEditorHooks.cs                          # Editor event hooks (Play Mode state)
-│   └── TomoLudens.PolicySingleton.Editor.asmdef         # Editor assembly definition
+│   ├── SingletonEditorHooks.cs                             # Editor event hooks (Play Mode state)
+│   └── TomoLudens.PolicySingleton.Editor.asmdef            # Editor assembly definition
 ├── Policy/
-│   ├── ISingletonPolicy.cs                              # Policy interface
-│   ├── PersistentPolicy.cs                              # Persistent policy implementation
-│   └── SceneScopedPolicy.cs                             # Scene-scoped policy implementation
-├── Tests/                                               # PlayMode & EditMode tests
+│   ├── ISingletonPolicy.cs                                 # Policy interface
+│   ├── PersistentPolicy.cs                                 # Persistent policy implementation
+│   └── SceneScopedPolicy.cs                                # Scene-scoped policy implementation
+├── Tests/                                                  # PlayMode & EditMode tests
 │   ├── Editor/
-│   │   ├── PolicySingletonEditorTests.cs                # EditMode tests
-│   │   └── TomoLudens.PolicySingleton.Editor.Tests.asmdef # Editor test assembly
+│   │   ├── PolicySingletonEditorTests.cs                   # EditMode tests
+│   │   └── TomoLudens.PolicySingleton.Editor.Tests.asmdef  # Editor test assembly
 │   ├── Runtime/
-│   │   ├── PolicySingletonRuntimeTests.cs               # PlayMode tests
-│   │   └── TomoLudens.PolicySingleton.Tests.asmdef      # Runtime test assembly
-│   └── TestExtensions.cs                                # Test-only extension methods
+│   │   ├── PolicySingletonRuntimeTests.cs                  # PlayMode tests
+│   │   └── TomoLudens.PolicySingleton.Tests.asmdef         # Runtime test assembly
+│   └── TestExtensions.cs                                   # Test-only extension methods
 ├── GlobalSingleton.cs                                      # Public API (persistent + auto-create)
 ├── SceneSingleton.cs                                       # Public API (scene-scoped + no auto-create)
 └── TomoLudens.PolicySingleton.asmdef                       # Assembly Definition
