@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TomoLudens.PolicySingleton.Policy;
 using UnityEngine;
 
@@ -8,7 +9,9 @@ namespace TomoLudens.PolicySingleton.Core
     /// </summary>
     /// <remarks>
     /// <para><b>Sealed only:</b> Concrete types MUST be <c>sealed</c>; subclassing is rejected at runtime.</para>
-    /// <para><b>Release builds:</b> Validations are stripped via <c>[Conditional]</c>; API returns <c>null</c>/<c>false</c> on failure.</para>
+    /// <para><b>Non-development builds:</b> Most validations are stripped via <c>[Conditional]</c>. In player builds, they run only when assertions are enabled
+    /// (e.g., <c>UNITY_ASSERTIONS</c> is defined or assertions are explicitly forced).</para>
+    /// <para><b>Release behavior:</b> When validations are stripped, APIs fail-soft and return <c>null</c>/<c>false</c> on failure.</para>
     /// <para><b>Lifecycle:</b> Override <c>Awake</c>/<c>OnEnable</c>/<c>OnDestroy</c> MUST call base (checked at runtime via OnEnable).</para>
     /// <para><b>Constraints:</b> Component must stay active+enabled. Main-thread only.</para>
     /// </remarks>
@@ -217,13 +220,13 @@ namespace TomoLudens.PolicySingleton.Core
 
             if (Application.isPlaying)
             {
-                Destroy(obj: candidate.gameObject);
+                DeactivateAndDestroy(go: candidate.gameObject);
             }
 
             return null;
         }
 
-        [System.Diagnostics.Conditional(conditionString: "UNITY_EDITOR"), System.Diagnostics.Conditional(conditionString: "DEVELOPMENT_BUILD")]
+        [Conditional(conditionString: "UNITY_EDITOR"), Conditional(conditionString: "DEVELOPMENT_BUILD"), Conditional(conditionString: "UNITY_ASSERTIONS")]
         private static void ThrowIfInactiveInstanceExists()
         {
             var allInstances = FindObjectsByType<T>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
@@ -248,6 +251,19 @@ namespace TomoLudens.PolicySingleton.Core
 
             _cachedPlaySessionId = current;
             _instance = null;
+        }
+
+        private static void DeactivateAndDestroy(GameObject go)
+        {
+            if (!Application.isPlaying) return;
+            if (go == null) return;
+
+            if (go.activeSelf)
+            {
+                go.SetActive(value: false);
+            }
+
+            Destroy(obj: go);
         }
 
         private void InitializeForCurrentPlaySessionIfNeeded()
@@ -278,14 +294,14 @@ namespace TomoLudens.PolicySingleton.Core
                 if (ReferenceEquals(objA: _instance, objB: this)) return true;
 
                 SingletonLogger.LogWarning<T>(message: $"Duplicate detected. Existing='{_instance.name}', destroying '{this.name}'.", context: this);
-                Destroy(obj: this.gameObject);
+                DeactivateAndDestroy(go: this.gameObject);
                 return false;
             }
 
             if (this.GetType() != typeof(T))
             {
                 SingletonLogger.LogError<T>(message: $"Type mismatch. Expected='{typeof(T).Name}', Actual='{this.GetType().Name}', destroying '{this.name}'.", context: this);
-                Destroy(obj: this.gameObject);
+                DeactivateAndDestroy(go: this.gameObject);
                 return false;
             }
 
