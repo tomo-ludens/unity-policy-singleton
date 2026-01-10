@@ -1,7 +1,7 @@
-using TomoLudens.PolicySingleton.Core;
-using TomoLudens.PolicySingleton.Policy;
+using PolicyDrivenSingleton.Core;
+using PolicyDrivenSingleton.Policy;
 
-namespace TomoLudens.PolicySingleton
+namespace PolicyDrivenSingleton
 {
     /// <summary>
     /// Base class for scene-local singletons that are destroyed on scene unload.

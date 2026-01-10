@@ -1,12 +1,12 @@
 using System.Text.RegularExpressions;
 using NUnit.Framework;
-using TomoLudens.PolicySingleton.Core;
-using TomoLudens.PolicySingleton.Policy;
+using PolicyDrivenSingleton.Core;
+using PolicyDrivenSingleton.Policy;
 using UnityEngine;
 using UnityEngine.TestTools;
 
 // ReSharper disable RedundantOverriddenMember
-namespace TomoLudens.PolicySingleton.Tests.Editor
+namespace PolicyDrivenSingleton.Tests.Editor
 {
     [TestFixture]
     public class SingletonRuntimeEditModeTests
@@ -363,7 +363,7 @@ namespace TomoLudens.PolicySingleton.Tests.Editor
         [Test]
         public void ThrowInvalidOperation_ThrowsWithCorrectMessage()
         {
-            var ex = Assert.Throws<System.InvalidOperationException>(() =>
+            var ex = Assert.Throws<System.InvalidOperationException>(code: () =>
             {
                 SingletonLogger.ThrowInvalidOperation<TestPersistentSingletonForEditMode>(message: "Test exception");
             });

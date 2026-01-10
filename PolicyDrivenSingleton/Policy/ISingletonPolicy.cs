@@ -1,4 +1,4 @@
-namespace TomoLudens.PolicySingleton.Policy
+namespace PolicyDrivenSingleton.Policy
 {
     /// <summary>
     /// Contract for singleton lifecycle policies. Used as a generic constraint in <c>SingletonBehaviour&lt;T, TPolicy&gt;</c>.

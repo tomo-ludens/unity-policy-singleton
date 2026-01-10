@@ -1,10 +1,11 @@
 {
-    "name": "TomoLudens.PolicySingleton.Tests",
-    "rootNamespace": "TomoLudens",
+    "name": "PolicyDrivenSingleton.Editor.Tests",
     "references": [
-        "TomoLudens.PolicySingleton"
+        "PolicyDrivenSingleton"
     ],
-    "includePlatforms": [],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,

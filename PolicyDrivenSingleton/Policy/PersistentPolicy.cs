@@ -1,9 +1,9 @@
-namespace TomoLudens.PolicySingleton.Policy
+namespace PolicyDrivenSingleton.Policy
 {
     /// <summary>
     /// Policy for application-lifetime singletons: persists across scenes, auto-creates if missing.
     /// </summary>
-    /// <seealso cref="Singletons.GlobalSingleton{T}"/>
+    /// <seealso cref="GlobalSingleton{T}"/>
     public readonly struct PersistentPolicy : ISingletonPolicy
     {
         /// <summary>

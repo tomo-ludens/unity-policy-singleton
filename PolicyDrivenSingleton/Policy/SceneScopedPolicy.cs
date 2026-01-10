@@ -1,9 +1,9 @@
-namespace TomoLudens.PolicySingleton.Policy
+namespace PolicyDrivenSingleton.Policy
 {
     /// <summary>
     /// Policy for scene-local singletons: no persistence, no auto-creation.
     /// </summary>
-    /// <seealso cref="Singletons.SceneSingleton{T}"/>
+    /// <seealso cref="SceneSingleton{T}"/>
     public readonly struct SceneScopedPolicy : ISingletonPolicy
     {
         /// <summary>

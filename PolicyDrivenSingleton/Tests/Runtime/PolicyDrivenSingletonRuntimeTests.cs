@@ -6,10 +6,11 @@ using System;
 using System.Collections;
 using System.Threading;
 using NUnit.Framework;
+using PolicyDrivenSingleton.Core;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace TomoLudens.PolicySingleton.Tests.Runtime
+namespace PolicyDrivenSingleton.Tests.Runtime
 {
     internal static class TestBuildGuards
     {
@@ -1348,7 +1349,7 @@ namespace TomoLudens.PolicySingleton.Tests.Runtime
 
             Assert.IsNotNull(anObject: instance, message: "Instance should exist before quitting");
 
-            Core.SingletonRuntime.NotifyQuitting();
+            SingletonRuntime.NotifyQuitting();
 
             bool result = TestPersistentSingleton.TryGetInstance(instance: out var retrieved);
             Assert.IsFalse(condition: result, message: "TryGetInstance should return false when quitting");
@@ -1358,7 +1359,7 @@ namespace TomoLudens.PolicySingleton.Tests.Runtime
         [UnityTest]
         public IEnumerator NewInstance_IsNotCreated_WhenQuitting()
         {
-            Core.SingletonRuntime.NotifyQuitting();
+            SingletonRuntime.NotifyQuitting();
 
             var instance = TestPersistentSingleton.Instance;
 
