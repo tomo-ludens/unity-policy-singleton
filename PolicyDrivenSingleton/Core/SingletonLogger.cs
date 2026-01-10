@@ -1,4 +1,3 @@
-// File: PolicyDrivenSingleton/Core/SingletonLogger.cs
 using System;
 using System.Diagnostics;
 using Debug = UnityEngine.Debug;
