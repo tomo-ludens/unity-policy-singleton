@@ -13,39 +13,42 @@ namespace PolicyDrivenSingleton.Core
     /// </remarks>
     internal static class SingletonLogger
     {
-        private const string EditorSymbol = "UNITY_EDITOR";
-        private const string DevBuildSymbol = "DEVELOPMENT_BUILD";
+        private const string EditorSymbol     = "UNITY_EDITOR";
+        private const string DevBuildSymbol   = "DEVELOPMENT_BUILD";
         private const string AssertionsSymbol = "UNITY_ASSERTIONS";
-
         private const string InfraTag = "PolicySingleton";
+        private const string InfraPrefix = "[" + InfraTag + "] ";
 
         private static class TypeTagCache<T>
         {
-            internal static readonly string Value = typeof(T).FullName ?? typeof(T).Name;
+            // ReSharper disable StaticMemberInGenericType
+            private static readonly string Tag = typeof(T).FullName ?? typeof(T).Name;
+            internal static readonly string Prefix = "[" + Tag + "] ";
+            // ReSharper restore StaticMemberInGenericType
         }
 
         [Conditional(conditionString: EditorSymbol), Conditional(conditionString: DevBuildSymbol), Conditional(conditionString: AssertionsSymbol)]
         public static void Log<T>(string message, UnityEngine.Object context = null)
-            => Debug.Log(message: $"[{TypeTagCache<T>.Value}] {message}", context: context);
+            => Debug.Log(message: TypeTagCache<T>.Prefix + message, context: context);
 
         [Conditional(conditionString: EditorSymbol), Conditional(conditionString: DevBuildSymbol), Conditional(conditionString: AssertionsSymbol)]
         public static void LogWarning(string message, UnityEngine.Object context = null)
-            => Debug.LogWarning(message: $"[{InfraTag}] {message}", context: context);
+            => Debug.LogWarning(message: InfraPrefix + message, context: context);
 
         [Conditional(conditionString: EditorSymbol), Conditional(conditionString: DevBuildSymbol), Conditional(conditionString: AssertionsSymbol)]
         public static void LogWarning<T>(string message, UnityEngine.Object context = null)
-            => Debug.LogWarning(message: $"[{TypeTagCache<T>.Value}] {message}", context: context);
+            => Debug.LogWarning(message: TypeTagCache<T>.Prefix + message, context: context);
 
         [Conditional(conditionString: EditorSymbol), Conditional(conditionString: DevBuildSymbol), Conditional(conditionString: AssertionsSymbol)]
         public static void LogError(string message, UnityEngine.Object context = null)
-            => Debug.LogError(message: $"[{InfraTag}] {message}", context: context);
+            => Debug.LogError(message: InfraPrefix + message, context: context);
 
         [Conditional(conditionString: EditorSymbol), Conditional(conditionString: DevBuildSymbol), Conditional(conditionString: AssertionsSymbol)]
         public static void LogError<T>(string message, UnityEngine.Object context = null)
-            => Debug.LogError(message: $"[{TypeTagCache<T>.Value}] {message}", context: context);
+            => Debug.LogError(message: TypeTagCache<T>.Prefix + message, context: context);
 
         [Conditional(conditionString: EditorSymbol), Conditional(conditionString: DevBuildSymbol), Conditional(conditionString: AssertionsSymbol)]
         public static void ThrowInvalidOperation<T>(string message)
-            => throw new InvalidOperationException(message: $"[{TypeTagCache<T>.Value}] {message}");
+            => throw new InvalidOperationException(message: TypeTagCache<T>.Prefix + message);
     }
 }
