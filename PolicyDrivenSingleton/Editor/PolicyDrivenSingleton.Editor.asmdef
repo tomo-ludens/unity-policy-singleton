@@ -1,7 +1,6 @@
 {
-	"name": "TomoLudens.PolicySingleton.Editor",
-	"rootNamespace": "TomoLudens",
-	"references": ["TomoLudens.PolicySingleton"],
+	"name": "PolicyDrivenSingleton.Editor",
+	"references": ["PolicyDrivenSingleton"],
 	"includePlatforms": ["Editor"],
 	"excludePlatforms": [],
 	"allowUnsafeCode": false,

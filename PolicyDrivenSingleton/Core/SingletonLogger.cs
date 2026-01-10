@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using Debug = UnityEngine.Debug;
 
-namespace TomoLudens.PolicySingleton.Core
+namespace PolicyDrivenSingleton.Core
 {
     /// <summary>
     /// Singleton infrastructure logger (dev-only).

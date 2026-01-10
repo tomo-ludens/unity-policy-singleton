@@ -1,8 +1,8 @@
 using System.Diagnostics;
-using TomoLudens.PolicySingleton.Policy;
+using PolicyDrivenSingleton.Policy;
 using UnityEngine;
 
-namespace TomoLudens.PolicySingleton.Core
+namespace PolicyDrivenSingleton.Core
 {
     /// <summary>
     /// Policy-driven singleton base class for <see cref="MonoBehaviour"/>.

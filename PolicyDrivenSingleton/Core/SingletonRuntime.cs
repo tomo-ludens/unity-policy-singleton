@@ -1,7 +1,7 @@
 using System.Threading;
 using UnityEngine;
 
-namespace TomoLudens.PolicySingleton.Core
+namespace PolicyDrivenSingleton.Core
 {
     /// <summary>
     /// Runtime state shared by singleton infrastructure.

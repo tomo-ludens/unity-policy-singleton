@@ -1,6 +1,5 @@
 {
-    "name": "TomoLudens.PolicySingleton",
-    "rootNamespace": "TomoLudens",
+    "name": "PolicyDrivenSingleton",
     "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
