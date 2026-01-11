@@ -53,6 +53,7 @@ namespace PolicyDrivenSingleton.Core
         {
             if (exception == null) return;
 
+            LogError(message: $"Exception: {exception.GetType().Name}: {exception.Message}", context: context);
             Debug.LogException(exception: exception, context: context);
         }
 

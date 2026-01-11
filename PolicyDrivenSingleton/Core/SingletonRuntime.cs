@@ -14,33 +14,38 @@ namespace PolicyDrivenSingleton.Core
     internal static class SingletonRuntime
     {
         private static int _playSessionId = 1;
-        private static int _isQuitting;
+        private static int _quittingFlag;
 
         private static int _mainThreadId;
         private static SynchronizationContext _mainThreadSyncContext;
 
         public static int PlaySessionId => Volatile.Read(location: ref _playSessionId);
-        public static bool IsQuitting => Volatile.Read(location: ref _isQuitting) != 0;
+        public static bool IsQuitting => Volatile.Read(location: ref _quittingFlag) != 0;
 
         internal static void EnsureInitializedForCurrentPlaySession()
         {
-            if (Volatile.Read(location: ref _mainThreadId) == 0 && SynchronizationContext.Current != null)
+            // If _mainThreadId is unset, try to infer it from Unity's SynchronizationContext.
+            if (Volatile.Read(location: ref _mainThreadId) == 0)
             {
-                Volatile.Write(location: ref _mainThreadId, value: Thread.CurrentThread.ManagedThreadId);
+                var currentSyncContext = SynchronizationContext.Current;
+                if (currentSyncContext != null && currentSyncContext.GetType().Name.Contains(value: "UnitySynchronizationContext"))
+                {
+                    Volatile.Write(location: ref _mainThreadId, value: Thread.CurrentThread.ManagedThreadId);
+                }
             }
 
             TryCaptureMainThreadContextIfOnMainThread();
         }
 
         internal static void ClearQuittingFlag()
-            => Volatile.Write(location: ref _isQuitting, value: 0);
+            => Volatile.Write(location: ref _quittingFlag, value: 0);
 
         /// <summary>
         /// Called from Unity's Application.quitting handler.
         /// Marks the runtime as "quitting" so singleton access can be blocked safely during shutdown.
         /// </summary>
         internal static void NotifyQuitting()
-            => Volatile.Write(location: ref _isQuitting, value: 1);
+            => Volatile.Write(location: ref _quittingFlag, value: 1);
 
         /// <summary>
         /// Validates current thread is main thread. Logs error if called from background thread.
@@ -56,10 +61,7 @@ namespace PolicyDrivenSingleton.Core
                 return true;
             }
 
-            SingletonLogger.LogError(
-                message: $"Main-thread-only API '{callerContext}' was called from background thread (id={Thread.CurrentThread.ManagedThreadId})."
-            );
-
+            SingletonLogger.LogError(message: $"Main-thread-only API '{callerContext}' was called from background thread (id={Thread.CurrentThread.ManagedThreadId}).");
             return false;
         }
 
@@ -80,16 +82,14 @@ namespace PolicyDrivenSingleton.Core
                 return true;
             }
 
-            var sc = Volatile.Read(location: ref _mainThreadSyncContext);
-            if (sc == null)
+            var mainThreadSyncContext = Volatile.Read(location: ref _mainThreadSyncContext);
+            if (mainThreadSyncContext == null)
             {
-                SingletonLogger.LogError(
-                    message: $"Cannot post to main thread: SynchronizationContext not captured. Caller='{callerContext ?? "(unspecified)"}'."
-                );
+                SingletonLogger.LogError(message: $"Cannot post to main thread: SynchronizationContext not captured. Caller='{callerContext ?? "(unspecified)"}'.");
                 return false;
             }
 
-            sc.Post(
+            mainThreadSyncContext.Post(
                 d: _ =>
                 {
                     try
@@ -130,10 +130,10 @@ namespace PolicyDrivenSingleton.Core
                 return;
             }
 
-            var sc = SynchronizationContext.Current;
-            if (sc != null && Volatile.Read(location: ref _mainThreadSyncContext) == null)
+            var currentSyncContext = SynchronizationContext.Current;
+            if (currentSyncContext != null && Volatile.Read(location: ref _mainThreadSyncContext) == null)
             {
-                Volatile.Write(location: ref _mainThreadSyncContext, value: sc);
+                Volatile.Write(location: ref _mainThreadSyncContext, value: currentSyncContext);
             }
         }
 
