@@ -5,183 +5,158 @@ using UnityEngine;
 namespace PolicyDrivenSingleton.Core
 {
     /// <summary>
-    /// Runtime state shared by singleton infrastructure.
+    /// Manages singleton lifecycle state: Play session boundaries, quitting detection, and main-thread validation.
     /// </summary>
     /// <remarks>
-    /// <para><b>PlaySessionId:</b> Invalidates stale static caches when Domain Reload is disabled.</para>
-    /// <para><b>Thread safety:</b> <c>volatile</c> fields ensure cross-thread visibility without locks.
-    /// Main thread ID is captured at <c>SubsystemRegistration</c>; background threads must not touch Unity APIs.</para>
+    /// <para>Captures main-thread ID and SynchronizationContext at SubsystemRegistration for cross-thread posting.</para>
+    /// <para>PlaySessionId increments each domain reload or Enter Play Mode, enabling stale-cache detection.</para>
     /// </remarks>
     internal static class SingletonRuntime
     {
-        private const int UninitializedMainThreadId = -1;
+        private static int _playSessionId = 1;
+        private static int _isQuitting;
 
-        // volatile: cross-thread visibility for best-effort SynchronizationContext capture.
-        private static volatile SynchronizationContext _mainThreadSyncContext;
-        private static volatile int _mainThreadId = UninitializedMainThreadId;
+        private static int _mainThreadId;
+        private static SynchronizationContext _mainThreadSyncContext;
 
-        private static int _lastBeginFrame = -1;
-
-        public static int PlaySessionId { get; private set; }
-        public static bool IsQuitting { get; private set; }
-
-        private static bool IsMainThread
-        {
-            get
-            {
-                int main = _mainThreadId;
-                return main != UninitializedMainThreadId && main == Thread.CurrentThread.ManagedThreadId;
-            }
-        }
+        public static int PlaySessionId => Volatile.Read(location: ref _playSessionId);
+        public static bool IsQuitting => Volatile.Read(location: ref _isQuitting) != 0;
 
         internal static void EnsureInitializedForCurrentPlaySession()
         {
-            if (!Application.isPlaying) return;
+            // Lazy initialization for cases where RuntimeInitializeOnLoadMethod hasn't run yet
+            if (Volatile.Read(location: ref _mainThreadId) == 0)
+            {
+                Volatile.Write(location: ref _mainThreadId, value: Thread.CurrentThread.ManagedThreadId);
+            }
 
-            Application.quitting -= OnQuitting;
-            Application.quitting += OnQuitting;
-
-            TryCaptureMainThreadSyncContextIfSafe();
+            TryCaptureMainThreadContextIfOnMainThread();
         }
 
+        internal static void ClearQuittingFlag()
+            => Volatile.Write(location: ref _isQuitting, value: 0);
+
         /// <summary>
-        /// Validates caller is on main thread. Emits Error log on violation (contract for tests).
+        /// Called from Unity's Application.quitting handler.
+        /// Marks the runtime as "quitting" so singleton access can be blocked safely during shutdown.
         /// </summary>
-        /// <remarks>
-        /// Fast path avoids Unity API calls when main thread ID is known (safe for background threads).
-        /// Slow path may touch <c>Application.isPlaying</c> and catches <c>UnityException</c> if called from background.
-        /// </remarks>
+        internal static void NotifyQuitting()
+            => Volatile.Write(location: ref _isQuitting, value: 1);
+
+        /// <summary>
+        /// Validates current thread is main thread. Logs error if called from background thread.
+        /// </summary>
+        /// <returns><c>true</c> if on main thread; otherwise <c>false</c>.</returns>
         internal static bool ValidateMainThread(string callerContext)
         {
-            // Fast path: known main thread ID, no Unity API access.
-            if (_mainThreadId != UninitializedMainThreadId)
+            // Ensure main thread ID is captured (handles case where RuntimeInitializeOnLoadMethod hasn't run yet)
+            EnsureInitializedForCurrentPlaySession();
+
+            if (IsMainThread())
             {
-                if (IsMainThread) return true;
-                LogMainThreadViolation(callerContext: callerContext, reason: null);
-                return false;
+                return true;
             }
 
-            // Slow path: attempt initialization, may touch Unity APIs.
-            try
-            {
-                if (!Application.isPlaying) return true;
+            SingletonLogger.LogError(
+                message: $"Main-thread-only API '{callerContext}' was called from background thread (id={Thread.CurrentThread.ManagedThreadId})."
+            );
 
-                EnsureInitializedForCurrentPlaySession();
-                TryCaptureMainThreadIdIfSafe();
-
-                if (_mainThreadId != UninitializedMainThreadId)
-                {
-                    if (IsMainThread) return true;
-                    LogMainThreadViolation(callerContext: callerContext, reason: null);
-                    return false;
-                }
-
-                LogMainThreadViolation(callerContext: callerContext, reason: "main thread id is not initialized yet");
-                return false;
-            }
-            catch (UnityException)
-            {
-                LogMainThreadViolation(callerContext: callerContext, reason: "Unity API access from a background thread");
-                return false;
-            }
+            return false;
         }
 
         /// <summary>
-        /// Posts action to main thread. Runs inline if already on main thread; posts via SyncContext otherwise.
+        /// Posts action to main thread. Executes immediately if already on main thread.
         /// </summary>
-        /// <returns><c>true</c> if posted/executed; <c>false</c> if SyncContext unavailable (fail-soft).</returns>
+        /// <returns><c>true</c> if posted/executed; <c>false</c> if action is null or SyncContext unavailable.</returns>
         internal static bool TryPostToMainThread(Action action, string callerContext = null)
         {
-            if (action == null) return false;
+            if (action == null)
+            {
+                return false;
+            }
 
-            if (_mainThreadId != UninitializedMainThreadId && IsMainThread)
+            if (IsMainThread())
             {
                 action();
                 return true;
             }
 
-            var ctx = _mainThreadSyncContext;
-            if (ctx == null)
+            var sc = Volatile.Read(location: ref _mainThreadSyncContext);
+            if (sc == null)
             {
-                LogMainThreadViolation(
-                    callerContext: callerContext ?? "TryPostToMainThread",
-                    reason: "main thread SynchronizationContext is not available");
+                SingletonLogger.LogError(
+                    message: $"Cannot post to main thread: SynchronizationContext not captured. Caller='{callerContext ?? "(unspecified)"}'."
+                );
                 return false;
             }
 
-            ctx.Post(d: static state => ((Action)state)?.Invoke(), state: action);
+            sc.Post(
+                d: _ =>
+                {
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogException(exception: ex);
+                    }
+                },
+                state: null
+            );
+
             return true;
         }
 
-        internal static void NotifyQuitting() => IsQuitting = true;
-
+#if UNITY_INCLUDE_TESTS
         /// <summary>
-        /// Editor/Tests helper: clears the quitting flag to avoid poisoning subsequent operations when statics persist.
+        /// Test-only: Increments PlaySessionId to simulate a new Play session boundary.
         /// </summary>
-        internal static void ClearQuittingFlag() => IsQuitting = false;
+        internal static void AdvancePlaySessionIdForTesting()
+        {
+            Interlocked.Increment(location: ref _playSessionId);
+        }
+#endif
+
+        private static bool IsMainThread()
+        {
+            int captured = Volatile.Read(location: ref _mainThreadId);
+            return captured != 0 && Thread.CurrentThread.ManagedThreadId == captured;
+        }
+
+        private static void TryCaptureMainThreadContextIfOnMainThread()
+        {
+            if (!IsMainThread())
+            {
+                return;
+            }
+
+            var sc = SynchronizationContext.Current;
+            if (sc != null && Volatile.Read(location: ref _mainThreadSyncContext) == null)
+            {
+                Volatile.Write(location: ref _mainThreadSyncContext, value: sc);
+            }
+        }
 
         [RuntimeInitializeOnLoadMethod(loadType: RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void SubsystemRegistration()
+        private static void OnSubsystemRegistration()
         {
-            if (!Application.isPlaying) return;
+            ClearQuittingFlag();
 
-            _mainThreadId = Thread.CurrentThread.ManagedThreadId;
-            TryCaptureMainThreadSyncContextIfSafe();
-            BeginNewPlaySession();
+            // Increment to mark new Play session (initial value is 1, so first session becomes 2)
+            Interlocked.Increment(location: ref _playSessionId);
+            Volatile.Write(location: ref _mainThreadId, value: Thread.CurrentThread.ManagedThreadId);
+
+            Application.quitting -= NotifyQuitting;
+            Application.quitting += NotifyQuitting;
+
+            TryCaptureMainThreadContextIfOnMainThread();
         }
 
         [RuntimeInitializeOnLoadMethod(loadType: RuntimeInitializeLoadType.AfterAssembliesLoaded)]
         private static void AfterAssembliesLoaded()
         {
-            if (!Application.isPlaying) return;
-            TryCaptureMainThreadSyncContextIfSafe();
-        }
-
-        private static void BeginNewPlaySession()
-        {
-            if (Time.frameCount == _lastBeginFrame) return;
-            _lastBeginFrame = Time.frameCount;
-
-            EnsureInitializedForCurrentPlaySession();
-            unchecked { PlaySessionId++; }
-            IsQuitting = false;
-        }
-
-        private static void OnQuitting() => NotifyQuitting();
-
-        /// <summary>
-        /// Heuristic: Unity main thread has non-null SyncContext; avoids capturing on background threads.
-        /// </summary>
-        private static void TryCaptureMainThreadIdIfSafe()
-        {
-            if (_mainThreadId != UninitializedMainThreadId) return;
-            if (SynchronizationContext.Current == null) return;
-            _mainThreadId = Thread.CurrentThread.ManagedThreadId;
-        }
-
-        private static void TryCaptureMainThreadSyncContextIfSafe()
-        {
-            if (_mainThreadSyncContext != null) return;
-
-            var ctx = SynchronizationContext.Current;
-            if (ctx == null) return;
-            if (_mainThreadId != UninitializedMainThreadId && !IsMainThread) return;
-
-            Interlocked.CompareExchange(location1: ref _mainThreadSyncContext, value: ctx, comparand: null);
-        }
-
-        private static void LogMainThreadViolation(string callerContext, string reason)
-        {
-            int current = Thread.CurrentThread.ManagedThreadId;
-            int main = _mainThreadId;
-
-            if (string.IsNullOrEmpty(value: reason))
-            {
-                SingletonLogger.LogError(message: $"{callerContext} must be called from the main thread.\nCurrent thread: {current}, Main thread: {main}.");
-                return;
-            }
-
-            SingletonLogger.LogError(message: $"{callerContext} must be called from the main thread ({reason}).\nCurrent thread: {current}, Main thread: {main}.");
+            TryCaptureMainThreadContextIfOnMainThread();
         }
     }
 }

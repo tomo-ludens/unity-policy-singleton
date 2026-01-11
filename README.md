@@ -110,8 +110,6 @@ Enter Play Mode Options の **Reload Domain を無効化**して static が Play
    例：`Assets/Plugins/PolicyDrivenSingleton/`
 2. 必要なら asmdef 名や namespace をプロジェクト方針に合わせて調整
 
-> NOTE: 参照（Prefab/Scene等）まで含む配布を想定する場合は `.meta` の扱いを運用として定義してください（「コード断片共有」なら不要）。
-
 ### Option B: Git で取り込み（任意）
 
 - submodule / subtree 等で `PolicyDrivenSingleton/` を取り込む運用も可能です
@@ -185,12 +183,25 @@ private void Update()
 
 ### Public surface
 
-| API                          | 目的               |                 自動生成 | 典型用途                     |
-| ---------------------------- | ---------------- | -------------------: | ------------------------ |
-| `T Instance { get; }`        | 必須経路で確立する        | Global: ✅ / Scene: ❌ | 起動・初期化・ゲーム進行必須           |
-| `bool TryGetInstance(out T)` | “あるなら使う”安全経路     |                    ❌ | 後片付け、解除、終了/中断経路          |
-| `OnPlaySessionStart()`       | Playセッションごとの再初期化 |                    - | Domain Reload OFF 対策、再購読 |
-| `TryPostToMainThread(Action)` | バックグラウンド→メイン委譲 |                    - | 非同期処理結果のUI反映等 |
+#### アクセサ（確立/取得）
+
+| メンバー | 目的 | 自動生成 | 典型用途 |
+|---|---|---|---|
+| `T Instance { get; }` | 必須経路：確立/取得 | `global_only` | 起動・初期化・ゲーム進行必須 |
+| `bool TryGetInstance(out T instance)` | 任意経路：あれば使う | `never` | 後片付け、解除、終了/中断経路 |
+
+**自動生成**
+- `global_only`: `GlobalSingleton<T>` は未存在なら生成、`SceneSingleton<T>` は生成しない
+- `never`: 生成しない
+
+---
+
+#### フック / ユーティリティ
+
+| メンバー | 目的 | 典型用途 |
+|---|---|---|
+| `protected virtual void OnPlaySessionStart()` | Playセッション単位の再初期化 | Domain Reload OFF 対策、再購読、キャッシュ再構築 |
+| `bool TryPostToMainThread(Action action)` | BG→メインへ委譲 | 非同期結果のUI反映、Unity API 呼び出し |
 
 ### Instance / TryGet の挙動（要点）
 
@@ -561,9 +572,13 @@ else
 
 A. Active/Enabled、メインスレッド、base呼び出し、終了中ガードのいずれかを確認してください。
 
+---
+
 **Q. 重複が検出される / 破棄される**
 
 A. 複数シーン・プレハブに同一型が混在している可能性があります。配置を整理してください。
+
+---
 
 **Q. 例外が出る環境と出ない環境がある**
 
