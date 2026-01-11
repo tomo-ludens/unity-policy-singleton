@@ -12,20 +12,11 @@ namespace PolicyDrivenSingleton.Tests
         /// <summary>
         /// Test-only: Resets static cache for this singleton type.
         /// </summary>
-        public static void ResetStaticCacheForTesting<TSingleton, TPolicy>(this SingletonBehaviour<TSingleton, TPolicy> singleton)
+        public static void ResetStaticCacheForTesting<TSingleton, TPolicy>(this SingletonBehaviour<TSingleton, TPolicy> _)
             where TSingleton : SingletonBehaviour<TSingleton, TPolicy>
             where TPolicy : struct, ISingletonPolicy
         {
-            // Use reflection to access private static fields
-            var type = typeof(SingletonBehaviour<TSingleton, TPolicy>);
-
-            // Reset _instance field
-            var instanceField = type.GetField(name: "_instance", bindingAttr: System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
-            instanceField?.SetValue(obj: null, value: null);
-
-            // Reset _cachedPlaySessionId field
-            var cachedIdField = type.GetField(name: "_cachedPlaySessionId", bindingAttr: System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
-            cachedIdField?.SetValue(obj: null, value: -1);
+            SingletonBehaviour<TSingleton, TPolicy>.ResetStaticCacheForTesting();
         }
 
         /// <summary>
@@ -36,18 +27,6 @@ namespace PolicyDrivenSingleton.Tests
         /// <summary>
         /// Test-only: Advances PlaySessionId to simulate a new Play session boundary.
         /// </summary>
-        public static void AdvancePlaySessionIdForTesting()
-        {
-            // PlaySessionId is an auto-property: backing field is &lt;PlaySessionId&gt;k__BackingField
-            var type = typeof(SingletonRuntime);
-            var field = type.GetField(name: "<PlaySessionId>k__BackingField", bindingAttr: System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
-            if (field == null) return;
-
-            int current = (int)field.GetValue(obj: null);
-            unchecked
-            {
-                field.SetValue(obj: null, value: current + 1);
-            }
-        }
+        public static void AdvancePlaySessionIdForTesting() => SingletonRuntime.AdvancePlaySessionIdForTesting();
     }
 }

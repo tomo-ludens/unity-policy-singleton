@@ -5,17 +5,6 @@ using UnityEngine;
 
 namespace PolicyDrivenSingleton.Core
 {
-    /// <summary>
-    /// Policy-driven singleton base class for <see cref="MonoBehaviour"/>.
-    /// </summary>
-    /// <remarks>
-    /// <para><b>Sealed only:</b> Concrete types MUST be <c>sealed</c>; subclassing is rejected at runtime.</para>
-    /// <para><b>Non-development builds:</b> Most validations are stripped via <c>[Conditional]</c>. In player builds, they run only when assertions are enabled
-    /// (e.g., <c>UNITY_ASSERTIONS</c> is defined or assertions are explicitly forced).</para>
-    /// <para><b>Release behavior:</b> When validations are stripped, APIs fail-soft and return <c>null</c>/<c>false</c> on failure.</para>
-    /// <para><b>Lifecycle:</b> Override <c>Awake</c>/<c>OnEnable</c>/<c>OnDestroy</c> MUST call base (checked at runtime via OnEnable).</para>
-    /// <para><b>Constraints:</b> Component must stay active+enabled. Main-thread only.</para>
-    /// </remarks>
     [DisallowMultipleComponent]
     public abstract class SingletonBehaviour<T, TPolicy> : MonoBehaviour
         where T : SingletonBehaviour<T, TPolicy>
@@ -29,6 +18,7 @@ namespace PolicyDrivenSingleton.Core
         // Per-closed-generic-type: intentional static-in-generic for type-specific singleton cache.
         // ReSharper disable once StaticMemberInGenericType
         private static T _instance;
+
         // ReSharper disable once StaticMemberInGenericType
         private static int _cachedPlaySessionId = UninitializedPlaySessionId;
 
@@ -36,13 +26,6 @@ namespace PolicyDrivenSingleton.Core
         private bool _isPersistent;
         private bool _baseAwakeCalled;
 
-        /// <summary>
-        /// Returns singleton instance. In PlayMode, returns null during quit, from background thread, or if validation fails in release.
-        /// </summary>
-        /// <returns>The singleton instance, or <c>null</c> if unavailable.</returns>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown in dev builds when: inactive instance exists, type mismatch detected, or auto-creation disabled with no instance.
-        /// </exception>
         public static T Instance
         {
             get
@@ -54,7 +37,10 @@ namespace PolicyDrivenSingleton.Core
 
                 if (!Application.isPlaying)
                 {
-                    return AsExactType(candidate: FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy), callerContext: "Instance[EditMode]");
+                    return AsExactType(
+                        candidate: FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy),
+                        callerContext: "Instance[EditMode]"
+                    );
                 }
 
                 InvalidateInstanceCacheIfPlaySessionChanged();
@@ -64,7 +50,11 @@ namespace PolicyDrivenSingleton.Core
                     SingletonLogger.Log<T>(message: "Instance access blocked: application is quitting.");
                     return null;
                 }
-                if (HasCachedInstance) return _instance;
+
+                if (HasCachedInstance)
+                {
+                    return _instance;
+                }
 
                 var candidate = FindAnyObjectByType<T>(findObjectsInactive: FindInactivePolicy);
                 candidate = AsExactType(candidate: candidate, callerContext: "Instance[PlayMode]");
@@ -73,21 +63,30 @@ namespace PolicyDrivenSingleton.Core
                 {
                     if (!candidate.isActiveAndEnabled)
                     {
-                        SingletonLogger.ThrowInvalidOperation<T>(message: $"Inactive/disabled instance detected.\nFound: '{candidate.name}' (type: '{candidate.GetType().Name}').\nEnable/activate it or remove it from the scene.");
+                        SingletonLogger.ThrowInvalidOperation<T>(
+                            message: $"Inactive/disabled instance detected.\nFound: '{candidate.name}' (type: '{candidate.GetType().Name}').\nEnable/activate it or remove it from the scene."
+                        );
                         return null;
                     }
 
                     candidate.InitializeForCurrentPlaySessionIfNeeded();
-                    if (HasCachedInstance) return _instance;
+
+                    if (HasCachedInstance)
+                    {
+                        return _instance;
+                    }
                 }
 
                 if (!Policy.AutoCreateIfMissing)
                 {
-                    SingletonLogger.ThrowInvalidOperation<T>(message: "No instance found and auto-creation is disabled by policy.\nPlace an active instance in the scene.");
+                    SingletonLogger.ThrowInvalidOperation<T>(
+                        message: "No instance found and auto-creation is disabled by policy.\nPlace an active instance in the scene."
+                    );
                     return null;
                 }
 
                 ThrowIfInactiveInstanceExists();
+
                 _instance = CreateInstance();
                 return _instance;
             }
@@ -95,13 +94,6 @@ namespace PolicyDrivenSingleton.Core
 
         private static bool HasCachedInstance => _instance != null;
 
-        /// <summary>
-        /// Non-creating lookup. Does NOT trigger auto-create even if policy allows.
-        /// </summary>
-        /// <returns><c>true</c> if instance exists and is valid; otherwise <c>false</c>.</returns>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown in dev builds when: inactive/disabled instance detected or type mismatch found.
-        /// </exception>
         public static bool TryGetInstance(out T instance)
         {
             if (!SingletonRuntime.ValidateMainThread(callerContext: $"{typeof(T).Name}.TryGetInstance"))
@@ -139,7 +131,9 @@ namespace PolicyDrivenSingleton.Core
             {
                 if (!candidate.isActiveAndEnabled)
                 {
-                    SingletonLogger.ThrowInvalidOperation<T>(message: $"Inactive/disabled instance detected.\nFound: '{candidate.name}' (type: '{candidate.GetType().Name}').\nEnable/activate it or remove it from the scene.");
+                    SingletonLogger.ThrowInvalidOperation<T>(
+                        message: $"Inactive/disabled instance detected.\nFound: '{candidate.name}' (type: '{candidate.GetType().Name}').\nEnable/activate it or remove it from the scene."
+                    );
                     instance = null;
                     return false;
                 }
@@ -157,38 +151,52 @@ namespace PolicyDrivenSingleton.Core
             return false;
         }
 
+#if UNITY_INCLUDE_TESTS
         /// <summary>
-        /// Override requires base.Awake() call.
+        /// Test-only: Resets static singleton cache to simulate fresh state.
         /// </summary>
+        internal static void ResetStaticCacheForTesting()
+        {
+            _instance = null;
+            _cachedPlaySessionId = UninitializedPlaySessionId;
+        }
+#endif
+
         protected virtual void Awake()
         {
-            if (!Application.isPlaying) return;
+            if (!Application.isPlaying)
+            {
+                return;
+            }
 
             _baseAwakeCalled = true;
-            this.InitializeForCurrentPlaySessionIfNeeded();
+            InitializeForCurrentPlaySessionIfNeeded();
         }
 
-        /// <summary>
-        /// Override requires base.OnEnable() call.
-        /// </summary>
         protected virtual void OnEnable()
         {
-            if (!Application.isPlaying) return;
+            if (!Application.isPlaying)
+            {
+                return;
+            }
 
             if (!_baseAwakeCalled)
             {
-                SingletonLogger.LogError<T>(message: $"base.Awake() was not called in {this.GetType().Name}.\nThis will prevent proper singleton initialization.\nMake sure to call base.Awake() at the beginning of your Awake() method.", context: this);
+                SingletonLogger.LogError<T>(
+                    message: $"base.Awake() was not called in {GetType().Name}.\nThis will prevent proper singleton initialization.\nMake sure to call base.Awake() at the beginning of your Awake() method.",
+                    context: this
+                );
             }
 
-            this.InitializeForCurrentPlaySessionIfNeeded();
+            InitializeForCurrentPlaySessionIfNeeded();
         }
 
-        /// <summary>
-        /// Override requires base.OnDestroy() call.
-        /// </summary>
         protected virtual void OnDestroy()
         {
-            if (!ReferenceEquals(objA: _instance, objB: this)) return;
+            if (!ReferenceEquals(objA: _instance, objB: this))
+            {
+                return;
+            }
 
             _instance = null;
         }
@@ -204,9 +212,30 @@ namespace PolicyDrivenSingleton.Core
         /// Posts action to main thread via <see cref="SingletonRuntime.TryPostToMainThread"/>.
         /// Use from background threads to safely interact with Unity APIs.
         /// </summary>
-        /// <returns><c>true</c> if posted/executed; <c>false</c> if SyncContext unavailable.</returns>
         protected static bool TryPostToMainThread(Action action, string callerContext = null)
-            => SingletonRuntime.TryPostToMainThread(action: action, callerContext: callerContext ?? $"{typeof(T).Name}.TryPostToMainThread");
+            => SingletonRuntime.TryPostToMainThread(
+                action: action,
+                callerContext: callerContext ?? $"{typeof(T).Name}.TryPostToMainThread"
+            );
+
+        private static void InvalidateInstanceCacheIfPlaySessionChanged()
+        {
+            if (!Application.isPlaying)
+            {
+                return;
+            }
+
+            SingletonRuntime.EnsureInitializedForCurrentPlaySession();
+
+            int current = SingletonRuntime.PlaySessionId;
+            if (_cachedPlaySessionId == current)
+            {
+                return;
+            }
+
+            _cachedPlaySessionId = current;
+            _instance = null;
+        }
 
         private static T CreateInstance()
         {
@@ -220,6 +249,7 @@ namespace PolicyDrivenSingleton.Core
             var instance = go.AddComponent<T>();
             instance._isPersistent = Policy.PersistAcrossScenes;
             instance.InitializeForCurrentPlaySessionIfNeeded();
+
             SingletonLogger.LogWarning<T>(message: "Auto-created.", context: instance);
 
             return instance;
@@ -227,10 +257,20 @@ namespace PolicyDrivenSingleton.Core
 
         private static T AsExactType(T candidate, string callerContext)
         {
-            if (candidate == null) return null;
-            if (candidate.GetType() == typeof(T)) return candidate;
+            if (candidate == null)
+            {
+                return null;
+            }
 
-            SingletonLogger.LogError<T>(message: $"Type mismatch found via '{callerContext}'.\nExpected EXACT type '{typeof(T).Name}', but found '{candidate.GetType().Name}'.", context: candidate);
+            if (candidate.GetType() == typeof(T))
+            {
+                return candidate;
+            }
+
+            SingletonLogger.LogError<T>(
+                message: $"Type mismatch found via '{callerContext}'.\nExpected EXACT type '{typeof(T).Name}', but found '{candidate.GetType().Name}'.",
+                context: candidate
+            );
 
             if (Application.isPlaying)
             {
@@ -243,34 +283,28 @@ namespace PolicyDrivenSingleton.Core
         [Conditional(conditionString: "UNITY_EDITOR"), Conditional(conditionString: "DEVELOPMENT_BUILD"), Conditional(conditionString: "UNITY_ASSERTIONS")]
         private static void ThrowIfInactiveInstanceExists()
         {
-            var allInstances = FindObjectsByType<T>(findObjectsInactive: FindObjectsInactive.Include, sortMode: FindObjectsSortMode.None);
+            var allInstances = FindObjectsByType<T>(
+                findObjectsInactive: FindObjectsInactive.Include,
+                sortMode: FindObjectsSortMode.None
+            );
 
             foreach (var instance in allInstances)
             {
                 if (!instance.isActiveAndEnabled)
                 {
-                    SingletonLogger.ThrowInvalidOperation<T>(message: $"Auto-create BLOCKED: inactive instance exists ('{instance.name}', type: '{instance.GetType().Name}').\nEnable it or remove from scene.");
+                    SingletonLogger.ThrowInvalidOperation<T>(
+                        message: $"Auto-create BLOCKED: inactive instance exists ('{instance.name}', type: '{instance.GetType().Name}').\nEnable it or remove from scene."
+                    );
                 }
             }
         }
 
-        private static void InvalidateInstanceCacheIfPlaySessionChanged()
-        {
-            if (!Application.isPlaying) return;
-
-            SingletonRuntime.EnsureInitializedForCurrentPlaySession();
-
-            int current = SingletonRuntime.PlaySessionId;
-            if (_cachedPlaySessionId == current) return;
-
-            _cachedPlaySessionId = current;
-            _instance = null;
-        }
-
         private static void DeactivateAndDestroy(GameObject go)
         {
-            if (!Application.isPlaying) return;
-            if (go == null) return;
+            if (!Application.isPlaying || go == null)
+            {
+                return;
+            }
 
             if (go.activeSelf)
             {
@@ -286,36 +320,54 @@ namespace PolicyDrivenSingleton.Core
 
             if (SingletonRuntime.IsQuitting)
             {
-                Destroy(obj: this.gameObject);
+                Destroy(obj: gameObject);
                 return;
             }
 
-            if (!this.TryEstablishAsInstance()) return;
+            if (!TryEstablishAsInstance())
+            {
+                return;
+            }
 
             int currentPlaySessionId = SingletonRuntime.PlaySessionId;
-            if (this._initializedPlaySessionId == currentPlaySessionId) return;
+            if (_initializedPlaySessionId == currentPlaySessionId)
+            {
+                return;
+            }
 
-            this.EnsurePersistent();
-            this._initializedPlaySessionId = currentPlaySessionId;
+            EnsurePersistent();
+
+            _initializedPlaySessionId = currentPlaySessionId;
             SingletonLogger.Log<T>(message: "OnPlaySessionStart invoked.", context: this);
-            this.OnPlaySessionStart();
+            OnPlaySessionStart();
         }
 
         private bool TryEstablishAsInstance()
         {
             if (HasCachedInstance)
             {
-                if (ReferenceEquals(objA: _instance, objB: this)) return true;
+                if (ReferenceEquals(objA: _instance, objB: this))
+                {
+                    return true;
+                }
 
-                SingletonLogger.LogWarning<T>(message: $"Duplicate detected. Existing='{_instance.name}', destroying '{this.name}'.", context: this);
-                DeactivateAndDestroy(go: this.gameObject);
+                SingletonLogger.LogWarning<T>(
+                    message: $"Duplicate detected. Existing='{_instance.name}', destroying '{name}'.",
+                    context: this
+                );
+
+                DeactivateAndDestroy(go: gameObject);
                 return false;
             }
 
-            if (this.GetType() != typeof(T))
+            if (GetType() != typeof(T))
             {
-                SingletonLogger.LogError<T>(message: $"Type mismatch. Expected='{typeof(T).Name}', Actual='{this.GetType().Name}', destroying '{this.name}'.", context: this);
-                DeactivateAndDestroy(go: this.gameObject);
+                SingletonLogger.LogError<T>(
+                    message: $"Type mismatch. Expected='{typeof(T).Name}', Actual='{GetType().Name}', destroying '{name}'.",
+                    context: this
+                );
+
+                DeactivateAndDestroy(go: gameObject);
                 return false;
             }
 
@@ -325,17 +377,19 @@ namespace PolicyDrivenSingleton.Core
 
         private void EnsurePersistent()
         {
-            if (!Policy.PersistAcrossScenes) return;
-            if (this._isPersistent) return;
-
-            if (this.transform.parent != null)
+            if (!Policy.PersistAcrossScenes || _isPersistent)
             {
-                SingletonLogger.LogWarning<T>(message: "Reparented to root for DontDestroyOnLoad.", context: this);
-                this.transform.SetParent(parent: null, worldPositionStays: true);
+                return;
             }
 
-            DontDestroyOnLoad(target: this.gameObject);
-            this._isPersistent = true;
+            if (transform.parent != null)
+            {
+                SingletonLogger.LogWarning<T>(message: "Reparented to root for DontDestroyOnLoad.", context: this);
+                transform.SetParent(parent: null, worldPositionStays: true);
+            }
+
+            DontDestroyOnLoad(target: gameObject);
+            _isPersistent = true;
         }
     }
 }
